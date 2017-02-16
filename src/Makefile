@@ -1,30 +1,39 @@
-AXIS_USABLE_LIBS = UCLIBC GLIBC
-AXIS_AUTO_DEPEND = yes
--include $(AXIS_TOP_DIR)/tools/build/Rules.axis
-INSTALL ?= install_elinux
-INSTALL_PATH = $(prefix)/usr/local
-INCDIR       = $(AXIS_KERNEL_DIR)/include
+PROG       = str
+CXXFLAGS   += -Wall -O2 -I$(STAGING_DIR_HOST)/usr/include-uapi
+LDFLAGS    += -s -lpthread -lasound
 
-LDFLAGS     = -Wl -s -L$(prefix)/lib -lpthread -lasound
-CXXFLAGS      = -Wall -O2 -I$(INCDIR)
+SRCS       = main.cpp streamer.cpp audio.cpp video.cpp socket.cpp rtsp.cpp rtp_stream.cpp helpers.cpp parameters.cpp
+STREAMER_OBJS = $(SRCS:.cpp=.o)
 
-STREAMER_OBJS   = main.o streamer.o audio.o video.o socket.o rtsp.o rtp_stream.o helpers.o parameters.o
-SRCS   = main.cpp streamer.cpp audio.cpp video.cpp socket.cpp rtsp.cpp rtp_stream.cpp helpers.cpp parameters.cpp
+INSTALL    = install
+INSTMODE   = 0755
+INSTDOCS   = 0644
+OWN        = -o root -g root
 
-PROG    = str
-all: dependency $(PROG)
+SYSCONFDIR = /etc/
+BINDIR     = /usr/bin/
+WWW_PAGES  = /www/pages
+IMAGEDIR   = $(WWW_PAGES)/images
 
-clean:
-	rm -f *.o *.ver *.mp *~ core*  $(PROG)
+all: $(PROG)
 
 $(PROG): $(STREAMER_OBJS)
-	$(CXX) $(LDFLAGS) -o $@  $(STREAMER_OBJS) -lpthread -asound
+	$(CXX) $(LDFLAGS) -o $@  $(STREAMER_OBJS)
 
 %.o: %.cpp
 	 $(CXX) $(CXXFLAGS) -c -o $@ $<
 
-#install:  $(PROG)
-install: clean $(PROG)
-	$(INSTALL) $(PROG) $(INSTALL_PATH)/bin/$(PROG)
+install: $(PROG)
+	$(INSTALL) $(OWN) -d $(DESTDIR)$(BINDIR)
+	$(INSTALL) -m $(INSTMODE) $(OWN) $(PROGS) $(DESTDIR)$(BINDIR)
 
-configsubs:
+clean:
+	rm -f *.o *.ver *.mp *~ core*  .depend $(PROG)
+
+depend: .depend
+
+.depend: $(SRCS)
+	rm -f ./.depend
+	$(CXX) $(CXXFLAGS) -MM $^ > ./.depend;
+
+include .depend
