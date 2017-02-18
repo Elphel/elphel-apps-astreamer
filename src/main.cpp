@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file main.cpp
+ * @brief Spawn single instance of streamer for each sensor port.
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -17,11 +17,12 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ */
 
 #include <iostream>
 #include <string>
 #include <map>
+#include <array>
 
 #include "streamer.h"
 
@@ -29,30 +30,59 @@ using namespace std;
 
 #include <unistd.h>
 #include <linux/sysctl.h>
+#include <elphel/c313a.h>
+#include <pthread.h>
+
+/**
+ * Unconditionally cancel all threads.
+ * @param   threads   an array of thread pointers
+ * @return  None
+ */
+void clean_up(array<pthread_t, SENSOR_PORTS> &threads) {
+	for (array<pthread_t, SENSOR_PORTS>::iterator it = threads.begin(); it != threads.end(); it++)
+		pthread_cancel(*it);
+}
 
 int main(int argc, char *argv[]) {
 	string opt;
 	map<string, string> args;
-	for(int i = 1; i < argc; i++) {
-		if(argv[i][0] == '-' && argv[i][1] != '\0') {
-			if(opt != "")
+	array < pthread_t, SENSOR_PORTS > threads;
+	array<Streamer *, SENSOR_PORTS> streamers;
+
+	for (int i = 1; i < argc; i++) {
+		if (argv[i][0] == '-' && argv[i][1] != '\0') {
+			if (opt != "")
 				args[opt] = "";
 			opt = &argv[i][1];
 			continue;
 		} else {
-			if(opt != "") {
+			if (opt != "") {
 				args[opt] = argv[i];
 				opt = "";
 			}
 		}
 	}
-	if(opt != "")
+	if (opt != "")
 		args[opt] = "";
-	for(map<string, string>::iterator it = args.begin(); it != args.end(); it++) {
+	for (map<string, string>::iterator it = args.begin(); it != args.end(); it++) {
 		cerr << "|" << (*it).first << "| == |" << (*it).second << "|" << endl;
 	}
 
-	Streamer *streamer = new Streamer(args);
-	streamer->Main();
+	for (int i = 0; i < SENSOR_PORTS; i++) {
+		pthread_attr_t attr;
+		streamers[i] = new Streamer(args);
+
+		pthread_attr_init(&attr);
+		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+		if (!pthread_create(&threads[i], &attr, Streamer::pthread_f, (void *) streamers[i])) {
+			cerr << "Can not spawn streamer thread for port " << to_string(i) << endl;
+			clean_up(threads);
+			exit(EXIT_FAILURE);
+		}
+		pthread_attr_destroy(&attr);
+	}
+	for (array<pthread_t, SENSOR_PORTS>::iterator it = threads.begin(); it != threads.end(); it++)
+		pthread_join(*it, NULL);
+
 	return 0;
 }
