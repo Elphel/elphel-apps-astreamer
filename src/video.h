@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file video.h
+ * @brief Provides video interface for streamer
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -28,10 +28,8 @@
 
 using namespace std;
 
-#include <asm/elphel/c313a.h>
-
-#define FRAMES_AHEAD_FPS 3 /// number of frames ahead of current to frite FPS limit
-#define FRAMES_SKIP_FPS  3 /// number of frames to wait after target so circbuf will have at least 2 frames with new fps for calculation
+#define FRAMES_AHEAD_FPS 3 /// number of frames ahead of current to write FPS limit
+#define FRAMES_SKIP_FPS  3 /// number of frames to wait after target so circbuf will have at least 2 frames with new FPS for calculation
 
 /// structure to store current video description
 struct video_desc_t {
@@ -51,7 +49,7 @@ public:
 		SIZE_CHANGE
 	};
 
-	Video(void);
+	Video(int port, Parameters *pars);
 
 	virtual ~Video(void);
 	/// return description of the current frame - i.e. current video parameters
@@ -81,6 +79,8 @@ protected:
 	unsigned long *buffer_ptr;
 	unsigned long *buffer_ptr_s;  /// Second copy of the circbuf just after the end of the first to prevent rollovers
 	void *frame_ptr;
+	int fd_circbuf;
+	int fd_jpeghead;
 
 	long capture(void);
 //	bool process(void);

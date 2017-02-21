@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file video.cpp
+ * @brief Provides video interface for streamer
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -28,19 +28,21 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-#include <asm/elphel/c313a.h>
-
 #include <iostream>
+#include <sstream>
+#include <string>
+#include <elphel/x393_devices.h>
+
 #include "streamer.h"
+
 using namespace std;
 
-#undef VIDEO_DEBUG
-#undef VIDEO_DEBUG_2	// for timestamp monitoring
-#undef VIDEO_DEBUG_3	// for FPS monitoring
-//#define VIDEO_DEBUG
-//#define VIDEO_DEBUG_2	// for timestamp monitoring
-//#define VIDEO_DEBUG_3	// for FPS monitoring
+//#undef VIDEO_DEBUG
+//#undef VIDEO_DEBUG_2	// for timestamp monitoring
+//#undef VIDEO_DEBUG_3	// for FPS monitoring
+#define VIDEO_DEBUG
+#define VIDEO_DEBUG_2	// for timestamp monitoring
+#define VIDEO_DEBUG_3	// for FPS monitoring
 
 #ifdef VIDEO_DEBUG
 	#define D(a) a
@@ -64,8 +66,8 @@ using namespace std;
 
 #define QTABLES_INCLUDE
 
-int fd_circbuf = 0;
-int fd_jpeghead = 0; /// to get quantization tables
+//int fd_circbuf = 0;
+//int fd_jpeghead = 0; /// to get quantization tables
 //int fd_fparmsall = 0;
 int lastDaemonBit = DAEMON_BIT_STREAMER;
 
@@ -73,37 +75,66 @@ int lastDaemonBit = DAEMON_BIT_STREAMER;
 //struct framepars_t       *framePars;
 //unsigned long            *globalPars; /// parameters that are not frame-related, their changes do not initiate any actions
 
-Video::Video(void) {
-D(	cerr << "Video::Video()" << endl;)
-D(	cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << endl;)
+static const char *circbuf_file_names[] = {
+		DEV393_PATH(DEV393_CIRCBUF0), DEV393_PATH(DEV393_CIRCBUF1),
+		DEV393_PATH(DEV393_CIRCBUF2), DEV393_PATH(DEV393_CIRCBUF3)
+};
+static const char *jhead_file_names[] = {
+		DEV393_PATH(DEV393_JPEGHEAD0), DEV393_PATH(DEV393_JPEGHEAD1),
+		DEV393_PATH(DEV393_JPEGHEAD2), DEV393_PATH(DEV393_JPEGHEAD3)
+};
+
+Video::Video(int port, Parameters *pars) {
+	string err_msg;
+
+	D( cerr << "Video::Video() on port " << port << endl;)
+	D( cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << endl;)
+	params = pars;
+	sensor_port = port;
 	stream_name = "video";
-	params = Parameters::instance();
+//	params = Parameters::instance();
 	waitDaemonEnabled(-1); /// <0 - use default
-	fd_circbuf = open("/dev/circbuf", O_RDONLY);
-	if(fd_circbuf < 0)
-		throw("can't open /dev/circbuf");
+	fd_circbuf = open(circbuf_file_names[sensor_port], O_RDONLY);
+	if (fd_circbuf < 0) {
+		err_msg = "can't open " + static_cast<ostringstream &>(ostringstream() << dec << sensor_port).str();
+		throw runtime_error(err_msg);
+	}
+
 	buffer_length = lseek(fd_circbuf, 0, SEEK_END);
 	/// mmap for all the lifetime of the program, not per stream. AF
-	buffer_ptr = (unsigned long *)mmap(0, buffer_length, PROT_READ, MAP_SHARED, fd_circbuf, 0);
-	if((int)buffer_ptr == -1)
-		throw("Error in mmap /dev/circbuf");
-	buffer_ptr_s = (unsigned long *)mmap(buffer_ptr + (buffer_length >>2 ), buffer_length, PROT_READ, MAP_FIXED | MAP_SHARED, fd_circbuf, 0);   /// preventing buffer rollovers
-	if((int)buffer_ptr_s == -1)
-		throw("Error in second mmap /dev/circbuf");
+	buffer_ptr = (unsigned long *) mmap(0, buffer_length, PROT_READ, MAP_SHARED, fd_circbuf, 0);
+	if ((int) buffer_ptr == -1) {
+		err_msg = "can't mmap " + *circbuf_file_names[sensor_port];
+		throw runtime_error(err_msg);
+	}
+	cout << "<-- 1" << endl;
+//	buffer_ptr_s = (unsigned long *) mmap(buffer_ptr + (buffer_length >> 2), buffer_length,
+//			PROT_READ, MAP_FIXED | MAP_SHARED, fd_circbuf, 0);   /// preventing buffer rollovers
+	buffer_ptr_s = (unsigned long *) mmap(buffer_ptr + (buffer_length >> 2), 100 * 4096,
+			PROT_READ, MAP_FIXED | MAP_SHARED, fd_circbuf, 0);   /// preventing buffer rollovers
+	cout << "<-- 2" << endl;
+	if ((int) buffer_ptr_s == -1) {
+		err_msg = "can't create second mmap for " + *circbuf_file_names[sensor_port];
+		throw runtime_error(err_msg);
+	}
+	cout << "<-- 3" << endl;
+
 	/// Skip several frames if it is just booted
 	/// May get stuck here if compressor is off, it should be enabled externally
-D(	cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length << endl;)
-	while(params->getGPValue(G_THIS_FRAME) < 10) {
+	D( cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length << endl;)
+	while (params->getGPValue(G_THIS_FRAME) < 10) {
 		lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// get to the end of buffer
 		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END); /// wait frame got ready there
 	}
 	/// One more wait always to make sure compressor is actually running
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
-	D(cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length <<endl;)
-	fd_jpeghead = open("/dev/jpeghead", O_RDWR);
-	if(fd_jpeghead < 0)
-		throw("can't open /dev/jpeghead");
+	D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length <<endl;)
+	fd_jpeghead = open(jhead_file_names[sensor_port], O_RDWR);
+	if (fd_jpeghead < 0) {
+		err_msg = "can't open " + *jhead_file_names[sensor_port];
+		throw runtime_error(err_msg);
+	}
 	qtables_include = true;
 
 	SSRC = 12;
@@ -112,19 +143,26 @@ D(	cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << para
 	rtcp_socket = NULL;
 	_play = false;
 	prev_jpeg_wp = 0;
-//	buffer_length = 0;
 	f_quality = -1;
-	
+
 	// create thread...
-	init_pthread((void *)this);
-D(	cerr  << __FILE__<< ":" << __FUNCTION__ << ":" << __LINE__ << endl;)
+	init_pthread((void *) this);
+	D( cerr << __FILE__<< ":" << __FUNCTION__ << ":" << __LINE__ << endl;)
 }
 
 Video::~Video(void) {
-cerr << "Video::~Video()" << endl;
-	if(fd_circbuf > 0)
+	cerr << "Video::~Video() on port " << sensor_port << endl;
+	if (buffer_ptr != NULL) {
+		munmap(buffer_ptr, buffer_length);
+		buffer_ptr = NULL;
+	}
+	if (buffer_ptr_s != NULL) {
+		munmap(buffer_ptr_s, buffer_length);
+		buffer_ptr_s = NULL;
+	}
+	if (fd_circbuf > 0)
 		close(fd_circbuf);
-	if(fd_jpeghead > 0)
+	if (fd_jpeghead > 0)
 		close(fd_jpeghead);
 }
 
@@ -183,16 +221,16 @@ void Video::Stop(void) {
  * @return (after possible waiting) true if there was no waiting, false if there was waiting
  */
 bool Video::waitDaemonEnabled(int daemonBit) { // <0 - use default
-	if((daemonBit >= 0) && (daemonBit < 32))
+	if ((daemonBit >= 0) && (daemonBit < 32))
 		lastDaemonBit = daemonBit;
 	unsigned long this_frame = params->getGPValue(G_THIS_FRAME);
 /// No semaphors, so it is possible to miss event and wait until the streamer will be re-enabled before sending message,
 /// but it seems not so terrible
-D(cerr << " lseek(fd_circbuf, LSEEK_DAEMON_CIRCBUF+lastDaemonBit, SEEK_END)... " << endl;)
+	D(cerr << " lseek(fd_circbuf" << fd_circbuf << ", LSEEK_DAEMON_CIRCBUF+lastDaemonBit, SEEK_END)... " << endl;)
 	lseek(fd_circbuf, LSEEK_DAEMON_CIRCBUF + lastDaemonBit, SEEK_END); /// 
-D(cerr << "...done" << endl;)
-   
-	if(this_frame == params->getGPValue(G_THIS_FRAME))
+	D(cerr << "...done" << endl;)
+
+	if (this_frame == params->getGPValue(G_THIS_FRAME))
 		return true;
 	return false;
 }
@@ -322,8 +360,6 @@ D3(cerr << "delta == " << _f << endl << endl;)
 	return video_desc;
 }
 
-//#define FRAMES_AHEAD_FPS 3 /// number of frames ahead of current to frite FPS limit
-//#define FRAMES_SKIP_FPS  3 /// number of frames to wait after target so circbuf will have at least 2 frames with new fps for calculation
 void Video::fps(float fps) {
 	if(fps < 0.01)
 		return;
