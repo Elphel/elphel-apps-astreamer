@@ -22,7 +22,6 @@
 #include <iostream>
 #include <string>
 #include <map>
-#include <array>
 
 #include "streamer.h"
 
@@ -38,16 +37,16 @@ using namespace std;
  * @param   threads   an array of thread pointers
  * @return  None
  */
-void clean_up(array<pthread_t, SENSOR_PORTS> &threads) {
-	for (array<pthread_t, SENSOR_PORTS>::iterator it = threads.begin(); it != threads.end(); it++)
-		pthread_cancel(*it);
+void clean_up(pthread_t *threads, size_t sz) {
+	for (size_t i = 0; i < sz; i++)
+		pthread_cancel(threads[i]);
 }
 
 int main(int argc, char *argv[]) {
 	string opt;
 	map<string, string> args;
-	array < pthread_t, SENSOR_PORTS > threads;
-	array<Streamer *, SENSOR_PORTS> streamers;
+	pthread_t threads[SENSOR_PORTS];
+	Streamer *streamers[SENSOR_PORTS] = {NULL};
 
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-' && argv[i][1] != '\0') {
@@ -70,19 +69,18 @@ int main(int argc, char *argv[]) {
 
 	for (int i = 0; i < SENSOR_PORTS; i++) {
 		pthread_attr_t attr;
-		streamers[i] = new Streamer(args);
+		streamers[i] = new Streamer(args, i);
 
 		pthread_attr_init(&attr);
-		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 		if (!pthread_create(&threads[i], &attr, Streamer::pthread_f, (void *) streamers[i])) {
-			cerr << "Can not spawn streamer thread for port " << to_string(i) << endl;
-			clean_up(threads);
+			cerr << "Can not spawn streamer thread for port " << i << endl;
+			clean_up(threads, SENSOR_PORTS);
 			exit(EXIT_FAILURE);
 		}
 		pthread_attr_destroy(&attr);
 	}
-	for (array<pthread_t, SENSOR_PORTS>::iterator it = threads.begin(); it != threads.end(); it++)
-		pthread_join(*it, NULL);
+	for (size_t i = 0; i < SENSOR_PORTS; i++)
+		pthread_join(threads[i], NULL);
 
 	return 0;
 }
