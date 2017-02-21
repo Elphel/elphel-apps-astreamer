@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file rtsp.h
+ * @brief RTSP server implementation
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -25,11 +25,14 @@
 //#include "types.h"
 #include "session.h"
 #include "socket.h"
+#include "parameters.h"
 
 #include <map>
 #include <list>
 #include <string>
 #include <iostream>
+#include <cstdio>
+#include <cstdlib>
 
 using namespace std;
 
@@ -81,7 +84,7 @@ public:
 	};
 	// if transport == NULL - wait for set_transport(), when client connected and ask DESCRIBE
 
-	RTSP_Server(int (*h)(void *, RTSP_Server *, RTSP_Server::event), void *handler_data, Session *_session = NULL);
+	RTSP_Server(int (*h)(void *, RTSP_Server *, RTSP_Server::event), void *handler_data, Parameters *pars, Session *_session = NULL);
 	~RTSP_Server();
 	
 	// deprecated
@@ -111,6 +114,7 @@ protected:
 	Socket *socket_main_1;
 	Socket *socket_main_2;
 //	Socket *socket_main_3;
+	Parameters *params;
 };
 
 #endif // _RTSP_H_

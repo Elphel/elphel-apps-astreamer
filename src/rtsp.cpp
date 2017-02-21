@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file rtsp.cpp
+ * @brief RTSP server implementation
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -21,17 +21,16 @@
 
 #include "rtsp.h"
 #include "helpers.h"
-#include "parameters.h"
 
 #include <string.h>
 #include <vector>
 
 using namespace std;
 
-#undef RTSP_DEBUG
-#undef RTSP_DEBUG_2
-//#define RTSP_DEBUG
-//#define RTSP_DEBUG_2
+//#undef RTSP_DEBUG
+//#undef RTSP_DEBUG_2
+#define RTSP_DEBUG
+#define RTSP_DEBUG_2
 
 #ifdef RTSP_DEBUG
 	#define D(a) a
@@ -126,13 +125,14 @@ string _Responce::serialize() {
 	return rez;
 }
 
-RTSP_Server::RTSP_Server(int (*h)(void *, RTSP_Server *, RTSP_Server::event), void *handler_data, Session *_session) {
+RTSP_Server::RTSP_Server(int (*h)(void *, RTSP_Server *, RTSP_Server::event), void *handler_data, Parameters *pars, Session *_session) {
 	socket_main_1 = NULL;
 	socket_main_2 = NULL;
 //	socket_main_3 = NULL;
 	handler_f = h;
 	this->handler_data = handler_data;
 	session = _session;
+	params = pars;
 //	_busy = NULL;
 }
 
@@ -143,82 +143,82 @@ void RTSP_Server::main(void) {
 	// once opened socket to listen can be closed and reopen again by Socket's implementation:
 	// opened port assigned to process id and is keeped all time while process is alive
 	// so, keep this socket
-	if(socket_main_1 == NULL) {
+	if (socket_main_1 == NULL) {
 		socket_main_1 = new Socket("", RTSP_PORT_1);
 		socket_main_1->listen(2);
 	}
-	if(socket_main_2 == NULL) {
+	if (socket_main_2 == NULL) {
 		socket_main_2 = new Socket("", RTSP_PORT_2);
 		socket_main_2->listen(2);
 	}
-/*
-	if(socket_main_3 == NULL) {
-		socket_main_3 = new Socket("", RTSP_PORT_3);
-		socket_main_3->listen(2);
-	}
-*/
-/*
-	if(socket_main == NULL) {
-//		socket_main = new Socket("", 554);
-//cerr << "create socket to listen port" << endl;
-		socket_main = new Socket("", RTSP_PORT);
-//		Socket *socket_1 = new Socket("", 554);
-//		Socket *socket_2 = new Socket("", 8554);
-//		Socket *socket_3 = new Socket("", 7070);
-		socket_main->listen(2);
-	} else {
-//cerr << "main socket already exist" << endl;
-	}
-*/
+	/*
+	 if(socket_main_3 == NULL) {
+	 socket_main_3 = new Socket("", RTSP_PORT_3);
+	 socket_main_3->listen(2);
+	 }
+	 */
+	/*
+	 if(socket_main == NULL) {
+	 //		socket_main = new Socket("", 554);
+	 //cerr << "create socket to listen port" << endl;
+	 socket_main = new Socket("", RTSP_PORT);
+	 //		Socket *socket_1 = new Socket("", 554);
+	 //		Socket *socket_2 = new Socket("", 8554);
+	 //		Socket *socket_3 = new Socket("", 7070);
+	 socket_main->listen(2);
+	 } else {
+	 //cerr << "main socket already exist" << endl;
+	 }
+	 */
 	s.push_back(socket_main_1);
 	s.push_back(socket_main_2);
 //	s.push_back(socket_main_3);
 
-D(static int count = 0;)
+	D(static int count = 0;)
 	bool to_poll = true;
 //	Parameters *params = Parameters::instance();
-	while(true) {
-		if(to_poll) {
+	while (true) {
+		if (to_poll) {
 			int poll_rez = Socket::poll(s, 500);
-D( {if(count < 5) {
-	cerr << "poll..." << endl;
-	count++;
-	}
-});
+			D( {if (count < 5) {
+					cerr << "poll..." << endl;
+					count++;
+				}
+			});
 			// TODO here:
 			// if client connected - check for changes of all possible parameters
 			// if client not connected - check only about enable/disable bit to prevent overhead
-			if(handler(PARAMS_WAS_CHANGED)) {
+			if (handler(PARAMS_WAS_CHANGED)) {
 				// stop all sessions, and restart streamer
 				handler(RESET);
 				break;
 			}
-			if(poll_rez == 0) {
+			if (poll_rez == 0) {
 				/// poll was finished with timeout, not socket event
 				to_poll = true;
 				continue;
 			}
 		}
 		to_poll = true;
-		for(list<Socket *>::iterator it = s.begin(); it != s.end(); it++) {
+		for (list<Socket *>::iterator it = s.begin(); it != s.end(); it++) {
 			Socket::state state = (*it)->state_refresh();
-			if(state == Socket::STATE_IN || state == Socket::STATE_DISCONNECT) {
-D2(cerr << endl << "something happen on the socket!" << endl;)
-				if(*it == socket_main_1 || *it == socket_main_2) {// || *it == socket_main_3) {
+			if (state == Socket::STATE_IN || state == Socket::STATE_DISCONNECT) {
+				D2(cerr << endl << "something happen on the socket!" << endl;)
+				if (*it == socket_main_1 || *it == socket_main_2) {	// || *it == socket_main_3) {
 //					Socket *in = socket_main->accept();
 					Socket *in = (*it)->accept();
-					if(in) {
+					if (in) {
 						in->set_so_keepalive(1);
-D2(cerr << "processed - s.push_back(in)" << endl;)
-D2(fprintf(stderr, "added : 0x%08X\n", in);)
+						D2(cerr << "processed - s.push_back(in)" << endl;)
+						D2(fprintf(stderr, "added : 0x%p\n", in);)
 						s.push_back(in);
 					}
 				} else {
 					// check for remove closed socket !
-D2(cerr << "was with non-main socket" << endl;)
-					if(!process(*it)) {
-D2(cerr << "process failed - remove it!" << endl;)
-D2(fprintf(stderr, "delete: 0x%08X\n", *it);)
+					D2(cerr << "was with non-main socket" << endl;)
+					if (!process(*it)) {
+						D2(cerr << "process failed - remove it!" << endl;)
+						D2(fprintf(stderr, "delete: 0x%p\n", *it);)
 						delete *it;
 						s.remove(*it);
 						// check about counters etc...
@@ -230,10 +230,10 @@ D2(fprintf(stderr, "delete: 0x%08X\n", *it);)
 		}
 	}
 	// stop all - by TEARDOWN command
-	for(list<Socket *>::iterator it = s.begin(); it != s.end(); it++) {
+	for (list<Socket *>::iterator it = s.begin(); it != s.end(); it++) {
 		// keep the 'main' i.e. server socket
-		if(*it != socket_main_1 && *it != socket_main_2) {// && *it != socket_main_3) {
-D2(fprintf(stderr, "delete: 0x%08X\n", *it);)
+		if (*it != socket_main_1 && *it != socket_main_2) {			// && *it != socket_main_3) {
+			D2(fprintf(stderr, "delete: 0x%p\n", *it);)
 			delete *it;
 		}
 	}
@@ -307,7 +307,7 @@ D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " part_REQUEST: " <
 	// process...
 	request = new _Request(req);
 
-	Parameters *params = Parameters::instance();
+//	Parameters *params = Parameters::instance();
 	responce = new _Responce();
 //	responce->add_field("CSeq", (*request->get_fields().find("CSeq")).second);
 	responce->add_field("CSeq", (request->get_fields())["CSeq"]);
