@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file parameters.h
+ * @brief Provides interface to global camera parameters
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -24,34 +24,21 @@
 
 #include <sys/types.h>
 #include <unistd.h>
-
 #include <string>
+#include <elphel/c313a.h>
 
 using namespace std;
 
-#include <asm/elphel/c313a.h>
-
-//#define FRAMES_AHEAD_FPS	3 /// number of video frames ahead of current to frite FPS limit
-//#define FRAMES_SKIP_FPS		3 /// number of video frames to wait after target so circbuf will have at least 2 frames with new fps for calculation
-
 class Parameters {
 public:
-/*
-	enum vevent {
-		VEVENT0,
-		DAEMON_DISABLED,
-		FPS_CHANGE,
-		SIZE_CHANGE
-	};
-*/
-	inline static Parameters *instance(void) {
-		if(_parameters == NULL)
-			_parameters = new Parameters();
-		return _parameters;
-	}
+//	inline static Parameters *instance(void) {
+//		if(_parameters == NULL)
+//			_parameters = new Parameters();
+//		return _parameters;
+//	}
+	Parameters(int port);
 	~Parameters(void);
 
-//	unsigned long get
 	/// interface to global camera parameters 
 	unsigned long getGPValue(unsigned long GPNumber);
 	void setGValue(unsigned long GNumber, unsigned long value);
@@ -61,15 +48,13 @@ public:
 	bool daemon_enabled(void);
 	void setPValue(unsigned long *val_array, int count);
 protected:
-	static Parameters *_parameters;
-	Parameters(void);
+//	static Parameters *_parameters;
 
 	struct framepars_all_t *frameParsAll;
 	struct framepars_t *framePars;
 	unsigned long *globalPars;
 	int fd_fparmsall;
+	int sensor_port;
 };
-
-//extern Video *video;
 
 #endif // _VIDEO__H_
