@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file streamer.h
+ * @brief Streamer implementation
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -33,7 +33,7 @@ using namespace std;
 
 class Streamer {
 public:
-	Streamer(const map<string, string> &args);
+	Streamer(const map<string, string> &args, int port_num);
 	~Streamer();
 	void Main(void);
 	bool opt_present(string name) {
@@ -41,11 +41,13 @@ public:
 			return true;
 		return false;
 	}
-	static Streamer *instance(void) {
+	Streamer *instance(void) {
 		return _streamer;
 	}
+	static void *pthread_f(void *_this);
+
 protected:
-	static Streamer *_streamer;
+	Streamer *_streamer;
 	static int f_handler(void *ptr, RTSP_Server *rtsp_server, RTSP_Server::event event);
 	int handler(RTSP_Server *rtsp_server, RTSP_Server::event event);
 
@@ -54,9 +56,11 @@ protected:
 	map<string, string> args;
 	RTSP_Server *rtsp_server;
 	Session *session;
+	int sensor_port;
 
 	Audio *audio;
 	Video *video;
+	Parameters *params;
 	bool running;
 	int connected_count;
 	void audio_init(void);

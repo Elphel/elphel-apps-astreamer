@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file srteamer.cpp
+ * @brief Streamer implementation
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -31,10 +31,10 @@
 
 using namespace std;
 
-#undef RTSP_DEBUG
-//#define RTSP_DEBUG
-#undef RTSP_DEBUG_2
-//#define RTSP_DEBUG_2
+//#undef RTSP_DEBUG
+#define RTSP_DEBUG
+//#undef RTSP_DEBUG_2
+#define RTSP_DEBUG_2
 
 #ifdef RTSP_DEBUG
 	#define D(a) a
@@ -48,14 +48,13 @@ using namespace std;
 	#define D2(a)
 #endif
 
-Streamer *Streamer::_streamer = NULL;
+//Streamer *Streamer::_streamer = NULL;
 
-Streamer::Streamer(const map<string, string> &_args) {
-	if(_streamer != NULL)
-		throw("can't make an another instance of streamer");
-	else
-		_streamer = this;
+Streamer::Streamer(const map<string, string> &_args, int port_num) {
+	sensor_port = port_num;
+	_streamer = this;
 	session = new Session();
+	params = new Parameters(sensor_port);
 	args = _args;
 	audio = NULL;
 	session->process_audio = false;
@@ -65,7 +64,7 @@ Streamer::Streamer(const map<string, string> &_args) {
 	session->rtp_out.ip_cached = 0;
 	session->video.fps_scale = 1;
 	audio_init();
-	video = new Video();
+	video = new Video(sensor_port, params);
 	if(opt_present("f")) {
 		float fps = 0;
 		fps = atof(args["f"].c_str());
@@ -79,13 +78,13 @@ D(		cout << "use fps: " << fps << endl;)
 }
 
 void Streamer::audio_init(void) {
-	if(audio != NULL) {
-D(		cerr << "delete audio" << endl;)
+	if (audio != NULL) {
+		D(cerr << "delete audio" << endl;)
 		delete audio;
 	}
-D(	cout << "audio_enabled == " << session->process_audio << endl;)
-	audio = new Audio(session->process_audio, session->audio.sample_rate, session->audio.channels);
-	if(audio->present() && session->process_audio) {
+	D(cout << "audio_enabled == " << session->process_audio << endl;)
+	audio = new Audio(session->process_audio, params, session->audio.sample_rate, session->audio.channels);
+	if (audio->present() && session->process_audio) {
 		session->process_audio = true;
 		session->audio.type = audio->ptype();
 		session->audio.sample_rate = audio->sample_rate();
@@ -101,6 +100,7 @@ D(	cout << "audio_enabled == " << session->process_audio << endl;)
 Streamer::~Streamer(void) {
 	delete video;
 	delete audio;
+	delete params;
 }
 
 int Streamer::f_handler(void *ptr, RTSP_Server *rtsp_server, RTSP_Server::event event) {
@@ -122,7 +122,7 @@ D(		cerr << "update_settings" << endl;)
 //	if(connected_count == 0) {
 
 	// don't change "on the fly" if someone already connected - like mcast clients
-	Parameters *params = Parameters::instance();
+//	Parameters *params = Parameters::instance();
 	// multicast parameters
 	// - multicast ip
 	// new values
@@ -350,7 +350,7 @@ D(	cerr << "event: running= " << running << " ";)
 		update_settings(true);
 		break;
 	case RTSP_Server::PARAMS_WAS_CHANGED:  /// Update frame size, fps before starting new stream (generating SDP file)
-		return (update_settings(false) || !(Parameters::instance()->daemon_enabled()));
+		return (update_settings(false) || !(params->daemon_enabled()));
 	case RTSP_Server::PLAY:
 D(		cerr << "==PLAY==";)
 		if(connected_count == 0) {
@@ -421,7 +421,7 @@ D(	cerr << endl;)
 }
 
 void Streamer::Main(void) {
-D(		cerr << "start Main" << endl;)
+	D( cerr << "start Main for sensor port " << sensor_port << endl;)
 	string def_mcast = "232.1.1.1";
 	int def_port = 20020;
 	string def_ttl = "2";
@@ -433,29 +433,36 @@ D(		cerr << "start Main" << endl;)
 	session->rtp_out.port_audio = def_port + 2;
 	session->rtp_out.ttl = def_ttl;
 	rtsp_server = NULL;
-	while(true) {
+	while (true) {
 		/// Check if the streamer is enabled, restart loop after waiting
-		if(!video->waitDaemonEnabled(-1)) {
+		if (!video->waitDaemonEnabled(-1)) {
 			sched_yield();
 			continue; /// may use particular bit instead of the "default" -1
 		}
 		update_settings(true);
 		/// Got here if is and was enabled (may use more actions instead of just "continue"
 		// start RTSP server
-D2(		cerr << "start server" << endl;)
-		if(rtsp_server == NULL)
-			rtsp_server = new RTSP_Server(Streamer::f_handler, (void *)this, session);
+		D2( cerr << "start server" << endl;)
+		if (rtsp_server == NULL)
+			rtsp_server = new RTSP_Server(Streamer::f_handler, (void *) this, params, session);
 		rtsp_server->main();
-D2(		cerr << "server was stopped" << endl;)
-D2(		cerr << "stop video" << endl;)
+		D2( cerr << "server was stopped" << endl;)
+		D2( cerr << "stop video" << endl;)
 		video->Stop();
-D2(		cerr << "stop audio" << endl;)
-		if(audio != NULL) {
+		D2( cerr << "stop audio" << endl;)
+		if (audio != NULL) {
 			audio->Stop();
 			// free audio resource - other app can use soundcard
-D2(			cerr << "delete audio" << endl;)
+			D2( cerr << "delete audio" << endl;)
 			delete audio;
 			audio = NULL;
 		}
 	}
+}
+
+void *Streamer::pthread_f(void *_this)
+{
+	Streamer *__this = (Streamer *)_this;
+	__this->Main();
+	return NULL;
 }
