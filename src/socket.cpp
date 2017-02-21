@@ -1,6 +1,6 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
+ * @file socket.cpp
+ * @brief Extends interface to sockets for streamer
  * @copyright Copyright (C) YEAR Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
@@ -21,6 +21,7 @@
 
 #include <string>
 #include <iostream>
+#include <cstdlib>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -39,8 +40,10 @@ using namespace std;
 #include "socket.h"
 #include "helpers.h"
 
-#undef RTSP_DEBUG
-#undef RTSP_DEBUG_2
+//#undef RTSP_DEBUG
+//#undef RTSP_DEBUG_2
+#define RTSP_DEBUG
+#define RTSP_DEBUG_2
 
 #ifdef RTSP_DEBUG
 	#define D(a) a

@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file rtp_stream.h
+ * @brief Base class for RTP streams
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -23,11 +23,13 @@
 #define __H_RTP_STREAM__
 
 #include <sys/time.h>
-#include <string>
+#include <cstring>
 #include <pthread.h>
 #include <semaphore.h>
-#include "socket.h"
 #include <stdint.h>
+
+#include "socket.h"
+#include "parameters.h"
 
 using namespace std;
 
@@ -74,6 +76,8 @@ protected:
 	void rtcp_send_sdes(void);
 
 	string stream_name;
+	Parameters *params;
+	int sensor_port;
 };
 
 #endif //__H_RTP_STREAM__
