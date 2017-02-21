@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file audio.h
+ * @brief Provides audio interface for streamer
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -23,10 +23,15 @@
 #define _AUDIO__H_
 
 #include <string>
+#ifdef __cplusplus
+	#undef __cplusplus
+#endif
 #define __cplusplus 1
 #include <alsa/asoundlib.h>
 #include <pthread.h>
+
 #include "rtp_stream.h"
+#include "parameters.h"
 
 using namespace std;
 
@@ -35,7 +40,7 @@ using namespace std;
 
 class Audio : public RTP_Stream {
 public:
-	Audio(bool enable, int sample_rate = SAMPLE_RATE, int channels = SAMPLE_CHANNELS);
+	Audio(bool enable, Parameters *pars, int sample_rate = SAMPLE_RATE, int channels = SAMPLE_CHANNELS);
 	virtual ~Audio(void);
 	long sample_rate(void) { return _sample_rate; };
 	long channels(void) { return _channels; };
@@ -61,11 +66,9 @@ protected:
 	void set_capture_volume(int volume);
 
 	uint64_t timestamp_rtcp;
-	long delta_fpga_sys;	// A/V clocks delta for RTCP
-bool is_first;
-bool is_first2;
+	long delta_fpga_sys;	                     // A/V clocks delta for RTCP
+	bool is_first;
+	bool is_first2;
 };
-
-//extern Audio *audio;
 
 #endif // _AUDIO__H_

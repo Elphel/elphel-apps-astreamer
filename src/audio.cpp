@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file audio.cpp
+ * @brief Provides audio interface for streamer
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -27,10 +27,6 @@
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
 
-#include <asm/elphel/c313a.h>
-
-#include "parameters.h"
-
 #undef AUDIO_DEBUG
 //#define AUDIO_DEBUG
 #undef AUDIO_DEBUG_2
@@ -54,12 +50,13 @@
 
 using namespace std;
 
-Audio::Audio(bool enable, int sample_rate, int channels) {
+Audio::Audio(bool enable, Parameters *pars, int sample_rate, int channels) {
 //cerr << "Audio::Audio()" << endl;
 	snd_pcm_hw_params_t *hw_params;
 	snd_pcm_sw_params_t *sw_params;
 	_present = false;
 	stream_name = "audio";
+	params = pars;
 
 	// normalize audio settings
 	if(sample_rate == 0)	sample_rate = SAMPLE_RATE;
@@ -216,7 +213,7 @@ D(	cerr << "Audio ---> Start !!!" << endl;)
 //cerr << "Audio ---> Start !!! - done" << endl;
 
 	// get FPGA/sys time delta
-	Parameters *params = Parameters::instance();
+//	Parameters *params = Parameters::instance();
 	unsigned long write_data[6];
 	write_data[0] = FRAMEPARS_GETFPGATIME;
 	write_data[1] = 0;
