@@ -1,6 +1,6 @@
 PROG       = str
-CXXFLAGS   += -Wall -O2 -std=c++11 -I$(STAGING_DIR_HOST)/usr/include-uapi
-LDFLAGS    += -s -lpthread -lasound
+CXXFLAGS   += -Wall -std=c++03 -I$(STAGING_DIR_HOST)/usr/include-uapi
+LDFLAGS    += -s -pthread -lasound
 
 SRCS       = main.cpp streamer.cpp audio.cpp video.cpp socket.cpp rtsp.cpp rtp_stream.cpp helpers.cpp parameters.cpp
 STREAMER_OBJS = $(SRCS:.cpp=.o)
@@ -18,14 +18,14 @@ IMAGEDIR   = $(WWW_PAGES)/images
 all: $(PROG)
 
 $(PROG): $(STREAMER_OBJS)
-	$(CXX) $(LDFLAGS) -o $@  $(STREAMER_OBJS)
+	$(CXX) -o $@ $(STREAMER_OBJS) $(LDFLAGS)
 
 %.o: %.cpp
 	 $(CXX) $(CXXFLAGS) -c -o $@ $<
 
 install: $(PROG)
 	$(INSTALL) $(OWN) -d $(DESTDIR)$(BINDIR)
-	$(INSTALL) -m $(INSTMODE) $(OWN) $(PROGS) $(DESTDIR)$(BINDIR)
+	$(INSTALL) -m $(INSTMODE) $(OWN) $(PROG) $(DESTDIR)$(BINDIR)
 
 clean:
 	rm -f *.o *.ver *.mp *~ core*  .depend $(PROG)
