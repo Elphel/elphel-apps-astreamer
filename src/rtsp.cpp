@@ -44,10 +44,12 @@ using namespace std;
 	#define D2(a)
 #endif
 
-#define RTSP_SIGN	"rtsp://"
-#define RTSP_PORT_1	554
-#define RTSP_PORT_2	8554
+#define RTSP_SIGN	              "rtsp://"
+#define RTSP_PRIMARY_PORT	      554
+#define RTSP_SECONDARY_PORT	      8554
 //#define RTSP_PORT_3	7070
+/** Maximun number of pending connections for a socket */
+#define MAX_CONNECTIONS           2
 
 // TODO
 _Request::_Request(const string &request) {
@@ -104,7 +106,7 @@ void _Responce::add_include(const string &_include) {
 
 string _Responce::serialize() {
 	string rez;
-	switch(_status) {
+	switch (_status) {
 	case STATUS_OK:
 		rez = "RTSP/1.0 200 OK\r\n";
 		break;
@@ -115,11 +117,11 @@ string _Responce::serialize() {
 		rez = "";
 		return rez;
 	}
-	for(map<string, string>::iterator it = fields.begin(); it != fields.end(); it++) {
+	for (map<string, string>::iterator it = fields.begin(); it != fields.end(); it++) {
 		rez += (*it).first + ": " + (*it).second + "\r\n";
 	}
 	rez += "\r\n";
-	if(include.length() != 0) {
+	if (include.length() != 0) {
 		rez += include;
 	}
 	return rez;
@@ -137,6 +139,7 @@ RTSP_Server::RTSP_Server(int (*h)(void *, RTSP_Server *, RTSP_Server::event), vo
 }
 
 void RTSP_Server::main(void) {
+	int port_num;
 	list<Socket *> s;
 	// create listen socket...
 
@@ -144,12 +147,14 @@ void RTSP_Server::main(void) {
 	// opened port assigned to process id and is keeped all time while process is alive
 	// so, keep this socket
 	if (socket_main_1 == NULL) {
-		socket_main_1 = new Socket("", RTSP_PORT_1);
-		socket_main_1->listen(2);
+		port_num = RTSP_PRIMARY_PORT + 2 * params->get_port_num();
+		socket_main_1 = new Socket("", port_num);
+		socket_main_1->listen(MAX_CONNECTIONS);
 	}
 	if (socket_main_2 == NULL) {
-		socket_main_2 = new Socket("", RTSP_PORT_2);
-		socket_main_2->listen(2);
+		port_num = RTSP_SECONDARY_PORT + 2 * params->get_port_num();
+		socket_main_2 = new Socket("", port_num);
+		socket_main_2->listen(MAX_CONNECTIONS);
 	}
 	/*
 	 if(socket_main_3 == NULL) {
