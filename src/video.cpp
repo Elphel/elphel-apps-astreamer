@@ -45,19 +45,31 @@ using namespace std;
 #define VIDEO_DEBUG_3	// for FPS monitoring
 
 #ifdef VIDEO_DEBUG
-	#define D(a) a
+	#define D(s_port, a) \
+	do { \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		a; \
+	} while (0)
 #else
 	#define D(a)
 #endif
 
 #ifdef VIDEO_DEBUG_2
-	#define D2(a) a
+	#define D2(s_port, a) \
+	do { \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		a; \
+	} while (0)
 #else
 	#define D2(a)
 #endif
 
 #ifdef VIDEO_DEBUG_3
-	#define D3(a) a
+	#define D3(s_port, a) \
+	do { \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		a; \
+	} while (0)
 #else
 	#define D3(a)
 #endif
@@ -87,8 +99,7 @@ static const char *jhead_file_names[] = {
 Video::Video(int port, Parameters *pars) {
 	string err_msg;
 
-	D( cerr << "Video::Video() on port " << port << endl;)
-	D( cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << endl;)
+	D(sensor_port, cerr << "Video::Video() on sensor port " << port << endl);
 	params = pars;
 	sensor_port = port;
 	stream_name = "video";
@@ -107,21 +118,16 @@ Video::Video(int port, Parameters *pars) {
 		err_msg = "can't mmap " + *circbuf_file_names[sensor_port];
 		throw runtime_error(err_msg);
 	}
-	cout << "<-- 1" << endl;
-//	buffer_ptr_s = (unsigned long *) mmap(buffer_ptr + (buffer_length >> 2), buffer_length,
-//			PROT_READ, MAP_FIXED | MAP_SHARED, fd_circbuf, 0);   /// preventing buffer rollovers
 	buffer_ptr_s = (unsigned long *) mmap(buffer_ptr + (buffer_length >> 2), 100 * 4096,
 			PROT_READ, MAP_FIXED | MAP_SHARED, fd_circbuf, 0);   /// preventing buffer rollovers
-	cout << "<-- 2" << endl;
 	if ((int) buffer_ptr_s == -1) {
 		err_msg = "can't create second mmap for " + *circbuf_file_names[sensor_port];
 		throw runtime_error(err_msg);
 	}
-	cout << "<-- 3" << endl;
 
 	/// Skip several frames if it is just booted
 	/// May get stuck here if compressor is off, it should be enabled externally
-	D( cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length << endl;)
+	D(sensor_port, cerr << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length << endl);
 	while (params->getGPValue(G_THIS_FRAME) < 10) {
 		lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// get to the end of buffer
 		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END); /// wait frame got ready there
@@ -129,7 +135,7 @@ Video::Video(int port, Parameters *pars) {
 	/// One more wait always to make sure compressor is actually running
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
-	D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length <<endl;)
+	D(sensor_port, cerr << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length <<endl);
 	fd_jpeghead = open(jhead_file_names[sensor_port], O_RDWR);
 	if (fd_jpeghead < 0) {
 		err_msg = "can't open " + *jhead_file_names[sensor_port];
@@ -147,7 +153,7 @@ Video::Video(int port, Parameters *pars) {
 
 	// create thread...
 	init_pthread((void *) this);
-	D( cerr << __FILE__<< ":" << __FUNCTION__ << ":" << __LINE__ << endl;)
+	D(sensor_port, cerr << "finish constructor" << endl);
 }
 
 Video::~Video(void) {
@@ -169,8 +175,8 @@ Video::~Video(void) {
 /// Compressor should be turned on outside of the streamer
 #define TURN_COMPRESSOR_ON 0
 void Video::Start(string ip, long port, int _fps_scale, int ttl) {
-D(	cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << "_play=" << _play << endl;)
-	if(_play) {
+	D(sensor_port, cerr << "_play=" << _play << endl);
+	if (_play) {
 		cerr << "ERROR-->> wrong usage: Video()->Start() when already play!!!" << endl;
 		return;
 	}
@@ -188,7 +194,7 @@ D(	cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << "_play=" << _play
 //	f_width = width();
 //	f_height = height();
 	fps_scale = _fps_scale;
-	if(fps_scale < 1)
+	if (fps_scale < 1)
 		fps_scale = 1;
 	fps_scale_c = 0;
 	/// start compressor...NOTE: Maybe it should not?
@@ -204,11 +210,11 @@ D(	cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << "_play=" << _play
 }
 
 void Video::Stop(void) {
-	if(!_play)
+	if (!_play)
 		return;
 //return;
 	RTP_Stream::Stop();
-		_play = false;
+	_play = false;
 	// destroy udp socket
 	prev_jpeg_wp = 0;
 }
@@ -226,9 +232,9 @@ bool Video::waitDaemonEnabled(int daemonBit) { // <0 - use default
 	unsigned long this_frame = params->getGPValue(G_THIS_FRAME);
 /// No semaphors, so it is possible to miss event and wait until the streamer will be re-enabled before sending message,
 /// but it seems not so terrible
-	D(cerr << " lseek(fd_circbuf" << fd_circbuf << ", LSEEK_DAEMON_CIRCBUF+lastDaemonBit, SEEK_END)... " << endl;)
+	D(sensor_port, cerr << " lseek(fd_circbuf" << sensor_port << ", LSEEK_DAEMON_CIRCBUF+lastDaemonBit, SEEK_END)... " << endl);
 	lseek(fd_circbuf, LSEEK_DAEMON_CIRCBUF + lastDaemonBit, SEEK_END); /// 
-	D(cerr << "...done" << endl;)
+	D(sensor_port, cerr << "...done" << endl);
 
 	if (this_frame == params->getGPValue(G_THIS_FRAME))
 		return true;
@@ -241,10 +247,10 @@ bool Video::waitDaemonEnabled(int daemonBit) { // <0 - use default
  * @return (after possible waiting) true if there was no waiting, false if there was waiting
  */
 bool Video::isDaemonEnabled(int daemonBit) { // <0 - use default
-	if((daemonBit >= 0) && (daemonBit < 32))
+	if ((daemonBit >= 0) && (daemonBit < 32))
 		lastDaemonBit = daemonBit;
 //	return((framePars[GLOBALPARS(G_THIS_FRAME) & PARS_FRAMES_MASK].pars[P_DAEMON_EN] & (1 << lastDaemonBit)) != 0);
-	return((params->getFrameValue(P_DAEMON_EN) & (1 << lastDaemonBit)) != 0);
+	return ((params->getFrameValue(P_DAEMON_EN) & (1 << lastDaemonBit)) != 0);
 }
 
 
@@ -260,63 +266,65 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 	long cur_pointer, p;
 
 	long this_pointer = 0;
-	if(ptr_before > 0) {
+	if (ptr_before > 0) {
 		/// if we need some before frame, we should set pointer to saved one (saved with before == 0)
 		this_pointer = lseek(fd_circbuf, ptr_before, SEEK_SET); /// restore the file pointer
 	}
-	if(ptr_before < 0) {
+	if (ptr_before < 0) {
 		/// otherwise, set pointer to the actual frame
-		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END);  /// byte index in circbuf of the frame start
+		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// byte index in circbuf of the frame start
 	}
-	if(ptr_before == 0)
+	if (ptr_before == 0)
 		this_pointer = lseek(fd_circbuf, 0, SEEK_CUR); /// save orifinal file pointer
-	char *char_buffer_ptr = (char *)buffer_ptr;
-	if(lseek(fd_circbuf, LSEEK_CIRC_VALID, SEEK_END) < 0) { /// Invalid frame - reset to the latest acquired
-		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_LAST, SEEK_END);    /// Last acquired frame (may be not yet available if none are)
+	char *char_buffer_ptr = (char *) buffer_ptr;
+	if (lseek(fd_circbuf, LSEEK_CIRC_VALID, SEEK_END) < 0) { /// Invalid frame - reset to the latest acquired
+		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_LAST, SEEK_END); /// Last acquired frame (may be not yet available if none are)
 	}
 	cur_pointer = this_pointer;
-	if(before == 0)
+	if (before == 0)
 		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
-	while(before && (((p = lseek(fd_circbuf, LSEEK_CIRC_PREV, SEEK_END))) >= 0)) { /// try to get earlier valid frame
+	while (before && (((p = lseek(fd_circbuf, LSEEK_CIRC_PREV, SEEK_END))) >= 0)) { /// try to get earlier valid frame
 		cur_pointer = p;
 		before--;
 	}
 
 	/// if 'before' is still >0 - not enough frames acquired, wait for more 
-	while(before > 0) {
+	while (before > 0) {
 		lseek(fd_circbuf, this_pointer, SEEK_SET);
 		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_NEXT, SEEK_END);
 		before--;
 	}
 	long metadata_start = cur_pointer - 32;
-	if(metadata_start < 0)
+	if (metadata_start < 0)
 		metadata_start += buffer_length;
 	/// copy the interframe data (timestamps are not yet there)
-D(cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " before=" << before << " metadata_start=" << metadata_start << endl;)
+	D(sensor_port, cerr << " before=" << before << " metadata_start=" << metadata_start << endl);
 	memcpy(frame_pars, &char_buffer_ptr[metadata_start], 32);
 	long jpeg_len = frame_pars->frame_length; //! frame_pars->frame_length is now the length of bitstream
-	if(frame_pars->signffff != 0xffff) {
-		cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << "  Wrong signature in getFramePars() (broken frame), frame_pars->signffff="<< frame_pars->signffff << endl;
-                int i;
-                long * dd =(long *) frame_pars;
-                cerr << hex << (metadata_start/4) << ": ";
+	if (frame_pars->signffff != 0xffff) {
+		cerr << __FILE__ << ":" << __FUNCTION__ << ":" << __LINE__
+				<< "  Wrong signature in getFramePars() (broken frame), frame_pars->signffff="
+				<< frame_pars->signffff << endl;
+		int i;
+		long * dd = (long *) frame_pars;
+		cerr << hex << (metadata_start / 4) << ": ";
 //                for (i=0;i<8;i++) {
-                for (i=0;i<8;i++) {
-                  cerr << hex << dd[i] << "  ";
-                }
-                cerr << dec << endl;
+		for (i = 0; i < 8; i++) {
+			cerr << hex << dd[i] << "  ";
+		}
+		cerr << dec << endl;
 		return -1;
 	} else {
 //            cerr << hex << (metadata_start/4) << dec << endl; ///************* debug
-        }
+	}
 	///   find location of the timestamp and copy it to the frame_pars structure
 	///==================================
-	long timestamp_start = (cur_pointer) + ((jpeg_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC; //! magic shift - should index first byte of the time stamp
-	if(timestamp_start >= buffer_length)
+	long timestamp_start = (cur_pointer) + ((jpeg_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32- CCAM_MMAP_META_SEC; //! magic shift - should index first byte of the time stamp
+	if (timestamp_start >= buffer_length)
 		timestamp_start -= buffer_length;
 	memcpy(&(frame_pars->timestamp_sec), &char_buffer_ptr[timestamp_start], 8);
-	if(ptr_before == 0)
+	if (ptr_before == 0)
 		lseek(fd_circbuf, this_pointer, SEEK_SET); /// restore the file pointer
 //D(cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " this_pointer=" << this_pointer << " cur_pointer=" << cur_pointer << endl;)
 	return cur_pointer;
@@ -332,23 +340,19 @@ struct video_desc_t Video::get_current_desc(bool with_fps) {
 	struct video_desc_t video_desc;
 	video_desc.valid = false;
 	long ptr = -1;
-	if((ptr = getFramePars(&frame_pars, FRAMEPARS_BEFORE, -1)) < 0) {
+	if ((ptr = getFramePars(&frame_pars, FRAMEPARS_BEFORE, -1)) < 0) {
 		return video_desc;
 	} else {
-		if(with_fps) {
-			if(getFramePars(&prev_pars,  FRAMEPARS_BEFORE + 1, ptr) < 0)
+		if (with_fps) {
+			if (getFramePars(&prev_pars, FRAMEPARS_BEFORE + 1, ptr) < 0)
 				return video_desc;
 			double fps = (frame_pars.timestamp_sec - prev_pars.timestamp_sec);
 			fps *= 1000000.0;
 			fps += frame_pars.timestamp_usec;
 			fps -= prev_pars.timestamp_usec;
-D3(			float _f = fps;)
 			fps = 1000000.0 / fps;
 			video_desc.fps = (used_fps = fps);
-D(			cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " fps=" << fps << endl;)
-//			cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " fps=" << video_desc.fps << endl;
-D3(if(_f == 0))
-D3(cerr << "delta == " << _f << endl << endl;)
+			D(sensor_port, cerr << " fps=" << fps << endl);
 		}
 	}
 	video_desc.valid = true;
@@ -361,7 +365,7 @@ D3(cerr << "delta == " << _f << endl << endl;)
 }
 
 void Video::fps(float fps) {
-	if(fps < 0.01)
+	if (fps < 0.01)
 		return;
 	/// currently limiting FPS only works with free running TODO: Add external trigger frequency support.
 	unsigned long write_data[6];
@@ -369,12 +373,12 @@ void Video::fps(float fps) {
 	write_data[0] = FRAMEPARS_SETFRAME;
 	write_data[1] = target_frame; /// wait then for that frame to be available on the output plus 2 frames for fps to be stable
 	write_data[2] = P_FP1000SLIM;
-	write_data[3] = (unsigned long)fps * 1000;
+	write_data[3] = (unsigned long) fps * 1000;
 	write_data[4] = P_FPSFLAGS;
 	write_data[5] = 3;
 //	long rslt = write(fd_fparmsall, write_data, sizeof(write_data));
 	int rslt = params->write(write_data, sizeof(write_data));
-	if(rslt == sizeof(write_data)) { /// written OK
+	if (rslt == sizeof(write_data)) { /// written OK
 //		lseek(fd_fparmsall, LSEEK_FRAME_WAIT_ABS + target_frame + FRAMES_SKIP_FPS, SEEK_END); /// skip frames 
 		params->lseek(LSEEK_FRAME_WAIT_ABS + target_frame + FRAMES_SKIP_FPS, SEEK_END); /// skip frames 
 	}
@@ -392,43 +396,44 @@ long Video::capture(void) {
 	int before;
 	///Make sure the streamer is not disabled through the bit in P_DAEMON_EN
 //	if((framePars[pars->getGPValue(G_THIS_FRAME) & PARS_FRAMES_MASK].pars[P_DAEMON_EN] & (1 << lastDaemonBit)) == 0) {
-	if((params->getFrameValue(P_DAEMON_EN) & (1 << lastDaemonBit)) == 0) {
+	if ((params->getFrameValue(P_DAEMON_EN) & (1 << lastDaemonBit)) == 0) {
 		return -DAEMON_DISABLED;  /// return exception (will stop the stream)
 	}
-	frameStartByteIndex = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END);  /// byte index in circbuf of the frame start
+	frameStartByteIndex = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// byte index in circbuf of the frame start
 	latestAvailableFrame_ptr = frameStartByteIndex;
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 
-	frame_ptr = (char *)((unsigned long)buffer_ptr + latestAvailableFrame_ptr);
+	frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
 //fprintf(stderr, "frame_ptr == %08X; ", frame_ptr);
-	if(latestAvailableFrame_ptr < 32)
+	if (latestAvailableFrame_ptr < 32)
 		latestAvailableFrame_ptr += buffer_length;
 	latestAvailableFrame_ptr >>= 2;
 	frame_len = buffer_ptr[latestAvailableFrame_ptr - 1];
 //	read timestamp
-	char *ts_ptr = (char *)((unsigned long)frame_ptr + (long)(((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
+	char *ts_ptr = (char *) ((unsigned long) frame_ptr + (long) (((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
 	unsigned long t[2];
-	memcpy(&t, (void *)ts_ptr, 8);
+	memcpy(&t, (void *) ts_ptr, 8);
 	f_tv.tv_sec = t[0];
 	f_tv.tv_usec = t[1];
 	// read Q value
-	char *meta = (char *)frame_ptr;
+	char *meta = (char *) frame_ptr;
 	meta -= 32;
-	if(meta < (char *)buffer_ptr)
+	if (meta < (char *) buffer_ptr)
 		meta += buffer_length;
-	struct interframe_params_t *fp = (struct interframe_params_t *)meta;
+	struct interframe_params_t *fp = (struct interframe_params_t *) meta;
 	/// See if the frame parameters are the same as used when starting the stream,
 	/// Otherwise check  for up to G_SKIP_DIFF_FRAME older frames and return them instead,
 	/// If that number is exceeded - return exception
 	/// Each time the latest acquired frame is considered, so we do not need to save frmae poointer additionally
-	if((fp->width != used_width) || (fp->height != used_height)) {
-		for(before = 1; before <= (int)params->getGPValue(G_SKIP_DIFF_FRAME); before++) {
-			if(((frameStartByteIndex = getFramePars(&frame_pars, before))) && (frame_pars.width == used_width) && (frame_pars.height == used_height)) {
+	if ((fp->width != used_width) || (fp->height != used_height)) {
+		for (before = 1; before <= (int) params->getGPValue(G_SKIP_DIFF_FRAME); before++) {
+			if (((frameStartByteIndex = getFramePars(&frame_pars, before)))
+					&& (frame_pars.width == used_width) && (frame_pars.height == used_height)) {
 				/// substitute older frame instead of the latest one. Leave wrong timestamp?
 				/// copying code above (may need some cleanup). Maybe - just move earlier so there will be no code duplication?
 				latestAvailableFrame_ptr = frameStartByteIndex;
-				frame_ptr = (char *)((unsigned long)buffer_ptr + latestAvailableFrame_ptr);
-				if(latestAvailableFrame_ptr < 32)
+				frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
+				if (latestAvailableFrame_ptr < 32)
 					latestAvailableFrame_ptr += buffer_length;
 				latestAvailableFrame_ptr >>= 2;
 				frame_len = buffer_ptr[latestAvailableFrame_ptr - 1];
@@ -443,40 +448,40 @@ long Video::capture(void) {
 //cerr << "used_width == " << used_width << "; current_width == " << frame_pars.width << endl;
 				/// update interframe data pointer
 //				char *meta = (char *)frame_ptr;
-				meta = (char *)frame_ptr;
+				meta = (char *) frame_ptr;
 				meta -= 32;
-				if(meta < (char *)buffer_ptr)
+				if (meta < (char *) buffer_ptr)
 					meta += buffer_length;
-				fp = (struct interframe_params_t *)meta;
+				fp = (struct interframe_params_t *) meta;
 				break;
 			}
 		}
-		if(before > (int) params->getGPValue(G_SKIP_DIFF_FRAME)) {
-D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< " Killing stream because of frame size change " << endl;)
+		if (before > (int) params->getGPValue(G_SKIP_DIFF_FRAME)) {
+			D(sensor_port, cerr << " Killing stream because of frame size change " << endl);
 			return -SIZE_CHANGE; /// It seems that frame size is changed for good, need to restart the stream
 		}
-D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< " Waiting for the original frame size to be restored , using " << before << " frames ago" << endl;)
+		D(sensor_port, cerr << " Waiting for the original frame size to be restored , using " << before << " frames ago" << endl);
 	}
 	///long Video::getFramePars(struct interframe_params_t * frame_pars, long before) {
 	///getGPValue(unsigned long GPNumber)
 	quality = fp->quality2;
-	if(qtables_include && quality != f_quality) {
-D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< " Updating quality tables, new quality is " << quality << endl;)
-			lseek(fd_jpeghead, frameStartByteIndex | 2, SEEK_END); /// '||2' indicates that we need just quantization tables, not full JPEG header
-			read(fd_jpeghead, (void *)&qtable[0], 128);
+	if (qtables_include && quality != f_quality) {
+		D(sensor_port, cerr << " Updating quality tables, new quality is " << quality << endl);
+		lseek(fd_jpeghead, frameStartByteIndex | 2, SEEK_END); /// '||2' indicates that we need just quantization tables, not full JPEG header
+		read(fd_jpeghead, (void *) &qtable[0], 128);
 	}
 	f_quality = quality;
-/*
-	// check statistic
-static bool first = true;
-if(first) {
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	first = false;
-	fprintf(stderr, "VIDEO first with time: %d:%06d at: %d:%06d\n", f_tv.tv_sec, f_tv.tv_usec, tv.tv_sec, tv.tv_usec);
-}
-*/
-	return frame_len;	
+	/*
+	 // check statistic
+	 static bool first = true;
+	 if(first) {
+	 struct timeval tv;
+	 gettimeofday(&tv, NULL);
+	 first = false;
+	 fprintf(stderr, "VIDEO first with time: %d:%06d at: %d:%06d\n", f_tv.tv_sec, f_tv.tv_usec, tv.tv_sec, tv.tv_usec);
+	 }
+	 */
+	return frame_len;
 }
 
 long Video::process(void) {
@@ -485,32 +490,32 @@ long Video::process(void) {
 	int to_send = _plen;
 	int _qtables_len = 128 + 4;
 	long frame_len = capture();
-	if(frame_len == 0) {
+	if (frame_len == 0) {
 //D(cerr << "[";)
 //		return false;
 		return 0; /// now never here
 	} else {
-		if(frame_len < 0) {
-D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< "capture returned negative" << frame_len << endl;)
+		if (frame_len < 0) {
+			D(sensor_port, cerr << "capture returned negative" << frame_len << endl);
 //			return false;
 			return frame_len; /// attention (restart) is needed
 		}
 	}
 	// check FPS decimation
 	bool to_skip = true;
-	if(fps_scale_c == 0)
+	if (fps_scale_c == 0)
 		to_skip = false;
 	fps_scale_c++;
-	if(fps_scale_c >= fps_scale)
+	if (fps_scale_c >= fps_scale)
 		fps_scale_c = 0;
 //cerr << "fps_scale == " << fps_scale << "; fps_scale_c == " << fps_scale_c << "; to_skip == " << to_skip << endl;
-	if(to_skip)
+	if (to_skip)
 		return 1;
 
 	int to_send_len = frame_len;
 	unsigned char h[20 + 4];
 	int packet_len = 0;
-	unsigned char *data = (unsigned char *)frame_ptr;
+	unsigned char *data = (unsigned char *) frame_ptr;
 
 	uint64_t t = f_tv.tv_sec;
 	t *= 90000;
@@ -519,22 +524,22 @@ D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< "capture returned ne
 	double f = f_tv.tv_usec;
 	f /= 1000000.0;
 	f *= 90000.0;
-	timestamp += (uint32_t)f;
+	timestamp += (uint32_t) f;
 	uint32_t ts;
 	ts = timestamp;
 	ts = htonl(ts);
 
 	long offset = 0;
 	void *v_ptr[4];
-	int v_len[4] = {0, 0, 0, 0};
+	int v_len[4] = { 0, 0, 0, 0 };
 	bool first = true;
-	while(to_send_len && _play) {
+	while (to_send_len && _play) {
 		unsigned long pnum = htons(packet_num);
 		bool last = false;
 		to_send = _plen;
-		if(qtables_include && first)
+		if (qtables_include && first)
 			to_send = _plen - _qtables_len;
-		if(to_send_len <= to_send) {
+		if (to_send_len <= to_send) {
 			packet_len = to_send_len;
 			to_send_len = 0;
 			last = true;
@@ -544,41 +549,41 @@ D(cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< "capture returned ne
 		}
 		// make RTP packet
 		h[0] = 0x80;
-		if(!last)
+		if (!last)
 			h[1] = _ptype;
 		else
 			h[1] = 0x80 + _ptype;
-		memcpy((void *)&h[2], (void *)&pnum, 2);
-		memcpy((void *)&h[4], (void *)&ts, 4);
-		memcpy((void *)&h[8], (void *)&SSRC, 4);
+		memcpy((void *) &h[2], (void *) &pnum, 2);
+		memcpy((void *) &h[4], (void *) &ts, 4);
+		memcpy((void *) &h[8], (void *) &SSRC, 4);
 		// make MJPEG header
 		unsigned long off = htonl(offset);
-		memcpy((void *)&h[12], (void *)&off, 4);
+		memcpy((void *) &h[12], (void *) &off, 4);
 		h[12] = 0x00;
 		h[16] = 0x01;
 		unsigned int q = f_quality;
-		if(qtables_include)
+		if (qtables_include)
 			q += 128;
-		h[17] = (unsigned char)(q & 0xFF);
-		if(f_width <= 2040)
+		h[17] = (unsigned char) (q & 0xFF);
+		if (f_width <= 2040)
 			h[18] = (f_width / 8) & 0xFF;
 		else
 			h[18] = 0;
-		if(f_height <= 2040)
+		if (f_height <= 2040)
 			h[19] = (f_height / 8) & 0xFF;
 		else
 			h[19] = 0;
 		h[20] = 0;
 		h[21] = 0;
 		unsigned short l = htons(128);
-		memcpy((void *)&h[22], (void *)&l, 2);
+		memcpy((void *) &h[22], (void *) &l, 2);
 		// update RTCP statistic
 		rtp_packets++;
 		rtp_octets += packet_len + 8; // data + MJPEG header
 		// send vector
-		if(first) {
+		if (first) {
 			v_ptr[0] = h;
-			if(qtables_include) {
+			if (qtables_include) {
 				v_len[0] = 24;
 				v_ptr[1] = qtable;
 				v_len[1] = 128;

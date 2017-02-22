@@ -47,6 +47,7 @@ public:
 	off_t lseek(off_t offset, int whence) { return ::lseek(fd_fparmsall, offset, whence); }
 	bool daemon_enabled(void);
 	void setPValue(unsigned long *val_array, int count);
+	inline int get_port_num() const {return sensor_port;}
 protected:
 //	static Parameters *_parameters;
 

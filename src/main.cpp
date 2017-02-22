@@ -38,11 +38,17 @@ using namespace std;
  * @return  None
  */
 void clean_up(pthread_t *threads, size_t sz) {
-	for (size_t i = 0; i < sz; i++)
-		pthread_cancel(threads[i]);
+	int ret_val;
+
+	for (size_t i = 0; i < sz; i++) {
+		ret_val = pthread_cancel(threads[i]);
+		if (!ret_val)
+			cout << "pthread_cancel returned " << ret_val << ", sensor port " << i << endl;
+	}
 }
 
 int main(int argc, char *argv[]) {
+	int ret_val;
 	string opt;
 	map<string, string> args;
 	pthread_t threads[SENSOR_PORTS];
@@ -72,8 +78,10 @@ int main(int argc, char *argv[]) {
 		streamers[i] = new Streamer(args, i);
 
 		pthread_attr_init(&attr);
-		if (!pthread_create(&threads[i], &attr, Streamer::pthread_f, (void *) streamers[i])) {
-			cerr << "Can not spawn streamer thread for port " << i << endl;
+		ret_val = pthread_create(&threads[i], &attr, Streamer::pthread_f, (void *) streamers[i]);
+		if (ret_val != 0) {
+			cerr << "Can not spawn streamer thread for port " << i;
+			cerr << ", pthread_create returned " << ret_val << endl;
 			clean_up(threads, SENSOR_PORTS);
 			exit(EXIT_FAILURE);
 		}
