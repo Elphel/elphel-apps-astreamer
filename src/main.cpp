@@ -73,8 +73,10 @@ int main(int argc, char *argv[]) {
 		cerr << "|" << (*it).first << "| == |" << (*it).second << "|" << endl;
 	}
 
-	for (int i = 0; i < SENSOR_PORTS; i++) {
+	for (int i = 0; i < 1; i++) {
+//	for (int i = 0; i < SENSOR_PORTS; i++) {
 		pthread_attr_t attr;
+		cout << "Start thread " << i << endl;
 		streamers[i] = new Streamer(args, i);
 
 		pthread_attr_init(&attr);

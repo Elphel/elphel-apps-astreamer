@@ -77,7 +77,6 @@ protected:
 //	struct timeval f_tv;
 	long buffer_length;
 	unsigned long *buffer_ptr;
-	unsigned long *buffer_ptr_s;  /// Second copy of the circbuf just after the end of the first to prevent rollovers
 	void *frame_ptr;
 	int fd_circbuf;
 	int fd_jpeghead;
@@ -85,6 +84,8 @@ protected:
 	long capture(void);
 //	bool process(void);
 	long  process(void);
+	unsigned long get_frame_len(unsigned long offset);
+	void get_frame_pars(void *frame_pars, unsigned long offset);
 
 	// for statistic
 	long v_t_sec;

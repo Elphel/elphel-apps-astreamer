@@ -77,6 +77,12 @@ using namespace std;
 //Video *video = NULL;
 
 #define QTABLES_INCLUDE
+/** The length of interframe parameters in bytes */
+#define METADATA_LEN              32
+/** Convert byte offset to double word offset */
+#define BYTE2DW(x)                ((x) >> 2)
+/** Convert double word offset to byte offset */
+#define DW2BYTE(x)                ((x) << 2)
 
 //int fd_circbuf = 0;
 //int fd_jpeghead = 0; /// to get quantization tables
@@ -104,7 +110,7 @@ Video::Video(int port, Parameters *pars) {
 	sensor_port = port;
 	stream_name = "video";
 //	params = Parameters::instance();
-	waitDaemonEnabled(-1); /// <0 - use default
+//	waitDaemonEnabled(-1); /// <0 - use default
 	fd_circbuf = open(circbuf_file_names[sensor_port], O_RDONLY);
 	if (fd_circbuf < 0) {
 		err_msg = "can't open " + static_cast<ostringstream &>(ostringstream() << dec << sensor_port).str();
@@ -116,12 +122,6 @@ Video::Video(int port, Parameters *pars) {
 	buffer_ptr = (unsigned long *) mmap(0, buffer_length, PROT_READ, MAP_SHARED, fd_circbuf, 0);
 	if ((int) buffer_ptr == -1) {
 		err_msg = "can't mmap " + *circbuf_file_names[sensor_port];
-		throw runtime_error(err_msg);
-	}
-	buffer_ptr_s = (unsigned long *) mmap(buffer_ptr + (buffer_length >> 2), 100 * 4096,
-			PROT_READ, MAP_FIXED | MAP_SHARED, fd_circbuf, 0);   /// preventing buffer rollovers
-	if ((int) buffer_ptr_s == -1) {
-		err_msg = "can't create second mmap for " + *circbuf_file_names[sensor_port];
 		throw runtime_error(err_msg);
 	}
 
@@ -161,10 +161,6 @@ Video::~Video(void) {
 	if (buffer_ptr != NULL) {
 		munmap(buffer_ptr, buffer_length);
 		buffer_ptr = NULL;
-	}
-	if (buffer_ptr_s != NULL) {
-		munmap(buffer_ptr_s, buffer_length);
-		buffer_ptr_s = NULL;
 	}
 	if (fd_circbuf > 0)
 		close(fd_circbuf);
@@ -267,41 +263,54 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 
 	long this_pointer = 0;
 	if (ptr_before > 0) {
-		/// if we need some before frame, we should set pointer to saved one (saved with before == 0)
-		this_pointer = lseek(fd_circbuf, ptr_before, SEEK_SET); /// restore the file pointer
+		// if we need some before frame, we should set pointer to saved one (saved with before == 0)
+		this_pointer = lseek(fd_circbuf, ptr_before, SEEK_SET); // restore the file pointer
 	}
 	if (ptr_before < 0) {
-		/// otherwise, set pointer to the actual frame
-		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// byte index in circbuf of the frame start
+		// otherwise, set pointer to the actual frame
+		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); // byte index in circbuf of the frame start
 	}
 	if (ptr_before == 0)
-		this_pointer = lseek(fd_circbuf, 0, SEEK_CUR); /// save orifinal file pointer
+		this_pointer = lseek(fd_circbuf, 0, SEEK_CUR);          // save original file pointer
 	char *char_buffer_ptr = (char *) buffer_ptr;
-	if (lseek(fd_circbuf, LSEEK_CIRC_VALID, SEEK_END) < 0) { /// Invalid frame - reset to the latest acquired
-		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_LAST, SEEK_END); /// Last acquired frame (may be not yet available if none are)
+	if (lseek(fd_circbuf, LSEEK_CIRC_VALID, SEEK_END) < 0) {    // Invalid frame - reset to the latest acquired
+		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_LAST, SEEK_END); // Last acquired frame (may be not yet available if none are)
 	}
 	cur_pointer = this_pointer;
 	if (before == 0)
 		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
-	while (before && (((p = lseek(fd_circbuf, LSEEK_CIRC_PREV, SEEK_END))) >= 0)) { /// try to get earlier valid frame
+	while (before && (((p = lseek(fd_circbuf, LSEEK_CIRC_PREV, SEEK_END))) >= 0)) { // try to get earlier valid frame
 		cur_pointer = p;
 		before--;
 	}
 
-	/// if 'before' is still >0 - not enough frames acquired, wait for more 
+	// if 'before' is still >0 - not enough frames acquired, wait for more
 	while (before > 0) {
 		lseek(fd_circbuf, this_pointer, SEEK_SET);
 		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 		this_pointer = lseek(fd_circbuf, LSEEK_CIRC_NEXT, SEEK_END);
 		before--;
 	}
-	long metadata_start = cur_pointer - 32;
-	if (metadata_start < 0)
+
+	/// copy the interframe data (time stamps are not yet there)
+	long metadata_start = cur_pointer - METADATA_LEN;
+	if (metadata_start >= 0) {
+		D(sensor_port, cerr << " before=" << before << " metadata_start=" << metadata_start << endl);
+		memcpy(frame_pars, &char_buffer_ptr[metadata_start], METADATA_LEN);
+	} else {
+		// matadata rolls over the end of the buffer and we need to copy both chunks
+		size_t meta_len_first = METADATA_LEN - cur_pointer;
 		metadata_start += buffer_length;
-	/// copy the interframe data (timestamps are not yet there)
-	D(sensor_port, cerr << " before=" << before << " metadata_start=" << metadata_start << endl);
-	memcpy(frame_pars, &char_buffer_ptr[metadata_start], 32);
-	long jpeg_len = frame_pars->frame_length; //! frame_pars->frame_length is now the length of bitstream
+		memcpy(frame_pars, &char_buffer_ptr[metadata_start], meta_len_first);
+		D(sensor_port, cerr << "metadata rolls over: metadata_start = " << metadata_start << "first chunk len = " << meta_len_first);
+
+		size_t meta_len_second = METADATA_LEN - meta_len_first;
+		char *dest = (char *)frame_pars;
+		memcpy(&dest[meta_len_first], char_buffer_ptr, meta_len_second);
+		D(sensor_port, cerr << ", second chunk len = " << meta_len_second << endl);
+	}
+
+	long jpeg_len = frame_pars->frame_length;                   // frame_pars->frame_length is now the length of bitstream
 	if (frame_pars->signffff != 0xffff) {
 		cerr << __FILE__ << ":" << __FUNCTION__ << ":" << __LINE__
 				<< "  Wrong signature in getFramePars() (broken frame), frame_pars->signffff="
@@ -309,7 +318,6 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 		int i;
 		long * dd = (long *) frame_pars;
 		cerr << hex << (metadata_start / 4) << ": ";
-//                for (i=0;i<8;i++) {
 		for (i = 0; i < 8; i++) {
 			cerr << hex << dd[i] << "  ";
 		}
@@ -318,15 +326,14 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 	} else {
 //            cerr << hex << (metadata_start/4) << dec << endl; ///************* debug
 	}
-	///   find location of the timestamp and copy it to the frame_pars structure
-	///==================================
+	// find location of the time stamp and copy it to the frame_pars structure
 	long timestamp_start = (cur_pointer) + ((jpeg_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32- CCAM_MMAP_META_SEC; //! magic shift - should index first byte of the time stamp
 	if (timestamp_start >= buffer_length)
 		timestamp_start -= buffer_length;
 	memcpy(&(frame_pars->timestamp_sec), &char_buffer_ptr[timestamp_start], 8);
 	if (ptr_before == 0)
 		lseek(fd_circbuf, this_pointer, SEEK_SET); /// restore the file pointer
-//D(cerr  << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ << " this_pointer=" << this_pointer << " cur_pointer=" << cur_pointer << endl;)
+
 	return cur_pointer;
 }
 
@@ -384,6 +391,47 @@ void Video::fps(float fps) {
 	}
 }
 
+/** Get frame length in bytes.
+ * @param   offset   byte offset of a frame in cirbuf
+ * @return  The length of the frame in bytes
+ */
+unsigned long Video::get_frame_len(unsigned long offset)
+{
+	unsigned long len;
+	long long len_offset = BYTE2DW(offset) - 1;
+
+	if (len_offset < 0) {
+		len_offset = BYTE2DW(buffer_length - offset) - 1;
+	}
+	len = buffer_ptr[len_offset];
+
+	return len;
+}
+
+/** Get interframe parameters for the frame offset given and copy them to a buffer.
+ * @param   frame_pars   buffer for interframe parameters
+ * @param   offset       starting offset of the frame in circbuf (in bytes)
+ * @return  None
+ */
+void Video::get_frame_pars(void *frame_pars, unsigned long offset)
+{
+	unsigned long remainder;
+	unsigned long pos;
+
+	if (offset >= METADATA_LEN) {
+		memcpy(frame_pars, &buffer_ptr[BYTE2DW(offset - METADATA_LEN)], METADATA_LEN);
+	} else {
+		// copy the chunk from the end of the buffer
+		remainder = METADATA_LEN - offset;
+		pos = buffer_length - offset;
+		memcpy(frame_pars, &buffer_ptr[BYTE2DW(pos)], remainder);
+
+		// copy the chunk from the beginning of the buffer
+		char *dest = (char *)frame_pars + remainder;
+		memcpy(dest, buffer_ptr, offset);
+	}
+}
+
 #define USE_REAL_OLD_TIMESTAMP 0
 long Video::capture(void) {
 	long frame_len;
@@ -404,39 +452,37 @@ long Video::capture(void) {
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 
 	frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
-//fprintf(stderr, "frame_ptr == %08X; ", frame_ptr);
-	if (latestAvailableFrame_ptr < 32)
-		latestAvailableFrame_ptr += buffer_length;
-	latestAvailableFrame_ptr >>= 2;
-	frame_len = buffer_ptr[latestAvailableFrame_ptr - 1];
-//	read timestamp
+	frame_len = get_frame_len(latestAvailableFrame_ptr);
+	D3(sensor_port, cerr << "Frame length " << frame_len << endl);
+
+	// read time stamp
 	char *ts_ptr = (char *) ((unsigned long) frame_ptr + (long) (((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
 	unsigned long t[2];
 	memcpy(&t, (void *) ts_ptr, 8);
 	f_tv.tv_sec = t[0];
 	f_tv.tv_usec = t[1];
 	// read Q value
-	char *meta = (char *) frame_ptr;
-	meta -= 32;
-	if (meta < (char *) buffer_ptr)
-		meta += buffer_length;
-	struct interframe_params_t *fp = (struct interframe_params_t *) meta;
-	/// See if the frame parameters are the same as used when starting the stream,
-	/// Otherwise check  for up to G_SKIP_DIFF_FRAME older frames and return them instead,
-	/// If that number is exceeded - return exception
-	/// Each time the latest acquired frame is considered, so we do not need to save frmae poointer additionally
+	struct interframe_params_t curr_frame_params;
+	struct interframe_params_t *fp = &curr_frame_params;
+	get_frame_pars(fp, latestAvailableFrame_ptr);
+	D3(sensor_port, cerr << "frame_pars->signffff " << fp->signffff << endl);
+
+	// See if the frame parameters are the same as were used when starting the stream,
+	// otherwise check for up to G_SKIP_DIFF_FRAME older frames and return them instead.
+	// If that number is exceeded - return exception.
+	// Each time the latest acquired frame is considered, so we do not need to save frame pointer additionally
 	if ((fp->width != used_width) || (fp->height != used_height)) {
+		D3(sensor_port, cerr << "Looks like frame size changed, new params: h = " << fp->height << ", w = " << fp->width << endl);
 		for (before = 1; before <= (int) params->getGPValue(G_SKIP_DIFF_FRAME); before++) {
 			if (((frameStartByteIndex = getFramePars(&frame_pars, before)))
 					&& (frame_pars.width == used_width) && (frame_pars.height == used_height)) {
-				/// substitute older frame instead of the latest one. Leave wrong timestamp?
-				/// copying code above (may need some cleanup). Maybe - just move earlier so there will be no code duplication?
+				// substitute older frame instead of the latest one. Leave wrong timestamp?
+				// copying code above (may need some cleanup). Maybe - just move earlier so there will be no code duplication?
 				latestAvailableFrame_ptr = frameStartByteIndex;
 				frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
-				if (latestAvailableFrame_ptr < 32)
-					latestAvailableFrame_ptr += buffer_length;
-				latestAvailableFrame_ptr >>= 2;
-				frame_len = buffer_ptr[latestAvailableFrame_ptr - 1];
+				frame_len = get_frame_len(latestAvailableFrame_ptr);
+				D3(sensor_port, cerr << "Frame length " << frame_len << endl);
+
 #if USE_REAL_OLD_TIMESTAMP
 /// read timestamp
 				ts_ptr = (char *)((unsigned long)frame_ptr + (long)(((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
@@ -447,12 +493,8 @@ long Video::capture(void) {
 //cerr << "skip frame: before == " << before << endl;
 //cerr << "used_width == " << used_width << "; current_width == " << frame_pars.width << endl;
 				/// update interframe data pointer
-//				char *meta = (char *)frame_ptr;
-				meta = (char *) frame_ptr;
-				meta -= 32;
-				if (meta < (char *) buffer_ptr)
-					meta += buffer_length;
-				fp = (struct interframe_params_t *) meta;
+				get_frame_pars(fp, latestAvailableFrame_ptr);
+				D3(sensor_port, cerr << "frame_pars->signffff" << fp->signffff << endl);
 				break;
 			}
 		}
@@ -532,6 +574,8 @@ long Video::process(void) {
 	long offset = 0;
 	void *v_ptr[4];
 	int v_len[4] = { 0, 0, 0, 0 };
+	struct iovec iov[4];
+	int vect_num;
 	bool first = true;
 	while (to_send_len && _play) {
 		unsigned long pnum = htons(packet_num);
@@ -581,34 +625,43 @@ long Video::process(void) {
 		rtp_packets++;
 		rtp_octets += packet_len + 8; // data + MJPEG header
 		// send vector
+		vect_num = 0;
+		iov[vect_num].iov_base = h;
 		if (first) {
-			v_ptr[0] = h;
 			if (qtables_include) {
-				v_len[0] = 24;
-				v_ptr[1] = qtable;
-				v_len[1] = 128;
-				v_ptr[2] = data;
-				v_len[2] = packet_len;
-				rtp_socket->send3v(&v_ptr[0], &v_len[0]);
+				iov[vect_num++].iov_len = 24;
+				iov[vect_num].iov_base = qtable;
+				iov[vect_num++].iov_len = 128;
 			} else {
-				v_len[0] = 20;
-				v_ptr[1] = data;
-				v_len[1] = packet_len;
-				rtp_socket->send2v(&v_ptr[0], &v_len[0]);
+				iov[vect_num++].iov_len = 20;
 			}
 			first = false;
 		} else {
-			v_ptr[0] = h;
-			v_len[0] = 20;
-			v_ptr[1] = data;
-			v_len[1] = packet_len;
-			rtp_socket->send2v(&v_ptr[0], &v_len[0]);
+			iov[vect_num++].iov_len = 20;
 		}
-		// --==--
+		if ((data + packet_len) <= (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length))) {
+			iov[vect_num].iov_base = data;
+			iov[vect_num++].iov_len = packet_len;
+			data += packet_len;
+		} else {
+			// current packet rolls over the end of the buffer, split it and set data pointer to the buffer start
+			int overshoot = (data + packet_len) - (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length));
+			int packet_len_first = packet_len - overshoot;
+			iov[vect_num].iov_base = data;
+			iov[vect_num++].iov_len = packet_len_first;
+
+			iov[vect_num].iov_base = buffer_ptr;
+			iov[vect_num++].iov_len = overshoot;
+			D3(sensor_port, cerr << "Current data packet rolls over the buffer, overshoot: " << overshoot <<
+					", packet_len_first: " << packet_len_first << endl);
+			data = (unsigned char *)buffer_ptr + overshoot;
+		}
+		rtp_socket->send_vect(iov, vect_num);
+
 		packet_num++;
-		data += packet_len;
 		offset += packet_len;
 	}
+	D3(sensor_port, cerr << "Packets sent: " << packet_num << endl);
 //D(cerr << "]";)
 //	return true;
 	return 1;

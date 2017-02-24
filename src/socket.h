@@ -58,6 +58,7 @@ public:
 	bool send(const string data);
 	bool send2v(void **v_ptr, int *v_len);
 	bool send3v(void **v_ptr, int *v_len);
+	bool send_vect(const struct iovec *iov, int num);
 
 	static int poll(list<Socket *> &s, int timeout = -1);
 	void listen(int in);

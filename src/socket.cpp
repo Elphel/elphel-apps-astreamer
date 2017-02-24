@@ -420,3 +420,13 @@ bool Socket::send3v(void **v_ptr, int *v_len) {
 		return true;
 	return false;
 }
+
+bool Socket::send_vect(const struct iovec *iov, int num)
+{
+	bool ret_val = false;
+
+	if (::writev(fd, iov, num))
+		ret_val = true;
+
+	return ret_val;
+}
