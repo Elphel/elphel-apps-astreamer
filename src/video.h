@@ -77,9 +77,11 @@ protected:
 //	struct timeval f_tv;
 	long buffer_length;
 	unsigned long *buffer_ptr;
+	unsigned char *buffer_ptr_end;                              // pointer to the end of the buffer
 	void *frame_ptr;
 	int fd_circbuf;
 	int fd_jpeghead;
+	int lastDaemonBit;
 
 	long capture(void);
 //	bool process(void);

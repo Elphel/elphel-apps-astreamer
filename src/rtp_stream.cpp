@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file rtp_stream.cpp
+ * @brief Base class for RTP streams
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -21,18 +21,23 @@
 
 #include <arpa/inet.h>
 #include <iostream>
+
 #include "rtp_stream.h"
 #include "helper.h"
 
 using namespace std;
 
-#define CNAME "elphel353"
+#define CNAME "elphel393"
 
-#undef RTP_DEBUG
-//#define RTP_DEBUG
+//#undef RTP_DEBUG
+#define RTP_DEBUG
 
 #ifdef RTP_DEBUG
-	#define D(a) a
+	#define D(s_port, a) \
+	do { \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		a; \
+	} while (0)
 #else
 	#define D(a)
 #endif
@@ -45,15 +50,16 @@ RTP_Stream::RTP_Stream(void) {
 	rtcp_socket = NULL;
 	sem_init(&sem_play, 0, 0);
 	pth_id = -1;
+	packet_num = 0;
 }
 
 RTP_Stream::~RTP_Stream() {
 //cerr << "RTP_Stream::~RTP_Stream() for stream " << stream_name << endl;
-	if(pth_id >= 0)
+	if (pth_id >= 0)
 		pthread_cancel(pth);
-	if(rtp_socket != NULL)
+	if (rtp_socket != NULL)
 		delete rtp_socket;
-	if(rtcp_socket != NULL)
+	if (rtcp_socket != NULL)
 		delete rtcp_socket;
 	sem_destroy(&sem_play);
 	pthread_mutex_destroy(&pthm_flow);
@@ -72,9 +78,9 @@ void *RTP_Stream::pthread_f(void *_this) {
 }
 
 void RTP_Stream::Start(string ip, int port, int ttl) {
-D(	cerr << " new " << stream_name << " UDP socket at port: " << port << endl;)
+	D(sensor_port, cerr << " new " << stream_name << " UDP socket at port: " << port << endl);
 	pthread_mutex_lock(&pthm_flow);
-	if(!_play) {
+	if (!_play) {
 		rtp_socket = new Socket(ip, port, Socket::TYPE_UDP, ttl);
 		rtcp_socket = new Socket(ip, port + 1, Socket::TYPE_UDP, ttl);
 		rtp_packets = 0;
@@ -92,20 +98,20 @@ D(	cerr << " new " << stream_name << " UDP socket at port: " << port << endl;)
 }
 
 void RTP_Stream::Stop(void) {
-D(	cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ <<endl;)
+	D(sensor_port, cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ <<endl);
 //cerr << "RTP_Stream::Stop() for stream " << stream_name << " - begin" << endl;
 	pthread_mutex_lock(&pthm_flow);
-	if(_play) {
+	if (_play) {
 //cerr << "RTP_Stream::Stop() for stream " << stream_name << " - in progress" << endl;
 		/// reset semaphore
 		sem_init(&sem_play, 0, 0);
 		_play = false;
 //		delete rtcp_socket;
-		if(rtp_socket != NULL) {
+		if (rtp_socket != NULL) {
 			delete rtp_socket;
 			rtp_socket = NULL;
 		}
-		if(rtcp_socket != NULL) {
+		if (rtcp_socket != NULL) {
 			delete rtcp_socket;
 			rtcp_socket = NULL;
 		}
@@ -124,17 +130,17 @@ D(	cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__ <<endl;)
  * @return never
  */
 void *RTP_Stream::thread(void) {
-D(	cerr << "RTP_Stream::thread(void)" <<endl;)
-	for(;;) {
+	D(sensor_port, cerr << "RTP_Stream::thread(void)" << endl);
+	for (;;) {
 		pthread_mutex_lock(&pthm_flow);
-		if(_play) {
+		if (_play) {
 			long f = process();
-			if(f > 0)
+			if (f > 0)
 				rtcp();
 			// process() and rtcp() use sockets
 			pthread_mutex_unlock(&pthm_flow);
-			if(f < 0) {
-D(				cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< "process exception detected: " << f << endl;)
+			if (f < 0) {
+				D(sensor_port, cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< "process exception detected: " << f << endl);
 //				cerr << "Stop() from thread for stream " << stream_name << endl;
 				Stop();
 			}
@@ -148,14 +154,14 @@ D(				cerr << __FILE__<< ":"<< __FUNCTION__ << ":" <<__LINE__<< "process excepti
 
 void RTP_Stream::rtcp(void) {
 	// check time for next one RTCP...
-	if(f_tv.tv_sec == 0 && f_tv.tv_usec == 0)
+	if (f_tv.tv_sec == 0 && f_tv.tv_usec == 0)
 		return;
 	long td = time_delta_us(f_tv, rtcp_tv);
-	if(td < 0) {
+	if (td < 0) {
 		rtcp_tv = f_tv;
 		return;
 	}
-	if(td < rtcp_delay)
+	if (td < rtcp_delay)
 		return;
 	rtcp_tv = f_tv;
 	rtcp_send_sdes();
@@ -172,61 +178,61 @@ void RTP_Stream::rtcp_send_sr(void) {
 	packet[0] = 0x81;
 	packet[1] = 200;	// SR
 	us = htons(((packet_len) / 4) - 1);
-	memcpy((void *)&packet[2], (void *)&us, 2);
-	memcpy((void *)&packet[4], (void *)&SSRC, 4);
+	memcpy((void *) &packet[2], (void *) &us, 2);
+	memcpy((void *) &packet[4], (void *) &SSRC, 4);
 	// NTP timestamp is a fixed point 32.32 format time
 	ul = htonl(f_tv.tv_sec);
-	memcpy((void *)&packet[8], (void *)&ul, 4);
+	memcpy((void *) &packet[8], (void *) &ul, 4);
 	double d = f_tv.tv_usec;
 	d /= 1000000.0;
 	d *= 65536.0;
 	d *= 4096.0;
-	uint32_t f = (uint32_t)d;
-	if(f > 0x0FFFFFFF)
+	uint32_t f = (uint32_t) d;
+	if (f > 0x0FFFFFFF)
 		f = 0x0FFFFFFF;
 	f <<= 4;
 	ul = htonl(f);
-	memcpy((void *)&packet[12], (void *)&ul, 4);
+	memcpy((void *) &packet[12], (void *) &ul, 4);
 	ul = htonl(timestamp);
-	memcpy((void *)&packet[16], (void *)&ul, 4);
+	memcpy((void *) &packet[16], (void *) &ul, 4);
 	ul = htonl(rtp_packets);
-	memcpy((void *)&packet[20], (void *)&ul, 4);
+	memcpy((void *) &packet[20], (void *) &ul, 4);
 	ul = htonl(rtp_octets);
-	memcpy((void *)&packet[24], (void *)&ul, 4);
+	memcpy((void *) &packet[24], (void *) &ul, 4);
 	rtcp_socket->send(packet, packet_len);
 }
 
 void RTP_Stream::rtcp_send_sdes(void) {
 	char packet[8 + 4 + 128]; // by RTP RFC 3550, for SDES RTCP packet needed 8 + 4 + ... bytes, 
-				  // so get additional 128 bytes for 126 CNAME field
+	// so get additional 128 bytes for 126 CNAME field
 	int packet_len = 0;
-        int padding=0;
+	int padding = 0;
 
 	uint16_t us;
 	const char *cname = CNAME;
 	int cname_len = strlen(cname);
-        bzero((void *)packet, 140); //8+4+128
+	bzero((void *) packet, 140); //8+4+128
 
 	// RTCP header
 	packet[0] = 0x81;
 	packet[1] = 202;
-	memcpy((void *)&packet[4], (void *)&SSRC, 4);
+	memcpy((void *) &packet[4], (void *) &SSRC, 4);
 	packet_len += 8;
 
 	// SDES fields
 	packet[8] = 0x01;
-	memcpy((void *)&packet[10], (void *)cname, cname_len);
+	memcpy((void *) &packet[10], (void *) cname, cname_len);
 	packet_len += 2; // + cname_len;
-        // calculate common length SDES 
-        padding=(cname_len+2)%4;
-	if(padding) 
-		cname_len += (4-padding); 
-	packet[9] = cname_len; 
-        // each chunk  MUST be terminated by one or more null octets(RFC3350)
-	packet_len += (cname_len+4);
+	// calculate common length SDES
+	padding = (cname_len + 2) % 4;
+	if (padding)
+		cname_len += (4 - padding);
+	packet[9] = cname_len;
+	// each chunk  MUST be terminated by one or more null octets(RFC3350)
+	packet_len += (cname_len + 4);
 
 	us = htons((packet_len / 4) - 1);
-	memcpy((void *)&packet[2], (void *)&us, 2);
+	memcpy((void *) &packet[2], (void *) &us, 2);
 
 	rtcp_socket->send(packet, packet_len);
 }

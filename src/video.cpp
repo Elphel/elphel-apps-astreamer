@@ -32,6 +32,7 @@
 #include <sstream>
 #include <string>
 #include <elphel/x393_devices.h>
+#include <iomanip>
 
 #include "streamer.h"
 
@@ -74,6 +75,15 @@ using namespace std;
 	#define D3(a)
 #endif
 
+#ifdef VIDEO_DEBUG
+	#define D_FOLLOW(a) \
+	do { \
+		a; \
+	} while (0)
+#else
+	#define D(a)
+#endif
+
 //Video *video = NULL;
 
 #define QTABLES_INCLUDE
@@ -87,7 +97,7 @@ using namespace std;
 //int fd_circbuf = 0;
 //int fd_jpeghead = 0; /// to get quantization tables
 //int fd_fparmsall = 0;
-int lastDaemonBit = DAEMON_BIT_STREAMER;
+//int lastDaemonBit = DAEMON_BIT_STREAMER;
 
 //struct framepars_all_t   *frameParsAll;
 //struct framepars_t       *framePars;
@@ -124,6 +134,7 @@ Video::Video(int port, Parameters *pars) {
 		err_msg = "can't mmap " + *circbuf_file_names[sensor_port];
 		throw runtime_error(err_msg);
 	}
+	buffer_ptr_end = (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length));
 
 	/// Skip several frames if it is just booted
 	/// May get stuck here if compressor is off, it should be enabled externally
@@ -453,10 +464,13 @@ long Video::capture(void) {
 
 	frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
 	frame_len = get_frame_len(latestAvailableFrame_ptr);
-	D3(sensor_port, cerr << "Frame length " << frame_len << endl);
+	D3(sensor_port, cerr << "Frame start byte index: " << frameStartByteIndex << ", Frame length " << frame_len);
 
 	// read time stamp
-	char *ts_ptr = (char *) ((unsigned long) frame_ptr + (long) (((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
+	unsigned char *ts_ptr = (unsigned char *) ((unsigned long) frame_ptr + (long) (((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
+	if (ts_ptr >= buffer_ptr_end) {
+		ts_ptr -= buffer_length;
+	}
 	unsigned long t[2];
 	memcpy(&t, (void *) ts_ptr, 8);
 	f_tv.tv_sec = t[0];
@@ -465,7 +479,7 @@ long Video::capture(void) {
 	struct interframe_params_t curr_frame_params;
 	struct interframe_params_t *fp = &curr_frame_params;
 	get_frame_pars(fp, latestAvailableFrame_ptr);
-	D3(sensor_port, cerr << "frame_pars->signffff " << fp->signffff << endl);
+	D_FOLLOW(cerr << ", frame_pars->signffff " << fp->signffff << endl);
 
 	// See if the frame parameters are the same as were used when starting the stream,
 	// otherwise check for up to G_SKIP_DIFF_FRAME older frames and return them instead.
@@ -473,6 +487,14 @@ long Video::capture(void) {
 	// Each time the latest acquired frame is considered, so we do not need to save frame pointer additionally
 	if ((fp->width != used_width) || (fp->height != used_height)) {
 		D3(sensor_port, cerr << "Looks like frame size changed, new params: h = " << fp->height << ", w = " << fp->width << endl);
+		D3(sensor_port, cerr << "shoud be h = " << used_height << ", w = " << used_width << endl);
+		D3(sensor_port, cerr << "latestAvailableFrame_ptr: " << latestAvailableFrame_ptr << endl);
+		D3(sensor_port, cerr << "Interframe params:" << endl);
+		unsigned int *iframe_data = (unsigned int *)fp;
+		for (size_t j = 0; j < sizeof(struct interframe_params_t) / 4; j++)
+			cerr << setfill('0') << setw(2) << "0x" << hex << iframe_data[j] << " ";
+		cerr << dec << endl;
+
 		for (before = 1; before <= (int) params->getGPValue(G_SKIP_DIFF_FRAME); before++) {
 			if (((frameStartByteIndex = getFramePars(&frame_pars, before)))
 					&& (frame_pars.width == used_width) && (frame_pars.height == used_height)) {
@@ -570,10 +592,9 @@ long Video::process(void) {
 	uint32_t ts;
 	ts = timestamp;
 	ts = htonl(ts);
+	D(sensor_port, cerr << "This frame's time stamp: " << timestamp << endl);
 
 	long offset = 0;
-	void *v_ptr[4];
-	int v_len[4] = { 0, 0, 0, 0 };
 	struct iovec iov[4];
 	int vect_num;
 	bool first = true;
@@ -639,7 +660,8 @@ long Video::process(void) {
 		} else {
 			iov[vect_num++].iov_len = 20;
 		}
-		if ((data + packet_len) <= (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length))) {
+//		if ((data + packet_len) <= (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length))) {
+		if ((data + packet_len) <= buffer_ptr_end) {
 			iov[vect_num].iov_base = data;
 			iov[vect_num++].iov_len = packet_len;
 			data += packet_len;
