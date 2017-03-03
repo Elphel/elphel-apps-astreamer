@@ -39,11 +39,11 @@
 using namespace std;
 
 //#undef VIDEO_DEBUG
-//#undef VIDEO_DEBUG_2	// for timestamp monitoring
-//#undef VIDEO_DEBUG_3	// for FPS monitoring
+//#undef VIDEO_DEBUG_2	                                        // for timestamp monitoring
+//#undef VIDEO_DEBUG_3	                                        // for FPS monitoring
 #define VIDEO_DEBUG
-#define VIDEO_DEBUG_2	// for timestamp monitoring
-#define VIDEO_DEBUG_3	// for FPS monitoring
+#define VIDEO_DEBUG_2	                                        // for timestamp monitoring
+#define VIDEO_DEBUG_3	                                        // for FPS monitoring
 
 #ifdef VIDEO_DEBUG
 	#define D(s_port, a) \
@@ -75,33 +75,12 @@ using namespace std;
 	#define D3(a)
 #endif
 
-#ifdef VIDEO_DEBUG
-	#define D_FOLLOW(a) \
-	do { \
-		a; \
-	} while (0)
-#else
-	#define D(a)
-#endif
-
-//Video *video = NULL;
-
-#define QTABLES_INCLUDE
 /** The length of interframe parameters in bytes */
 #define METADATA_LEN              32
 /** Convert byte offset to double word offset */
 #define BYTE2DW(x)                ((x) >> 2)
 /** Convert double word offset to byte offset */
 #define DW2BYTE(x)                ((x) << 2)
-
-//int fd_circbuf = 0;
-//int fd_jpeghead = 0; /// to get quantization tables
-//int fd_fparmsall = 0;
-//int lastDaemonBit = DAEMON_BIT_STREAMER;
-
-//struct framepars_all_t   *frameParsAll;
-//struct framepars_t       *framePars;
-//unsigned long            *globalPars; /// parameters that are not frame-related, their changes do not initiate any actions
 
 static const char *circbuf_file_names[] = {
 		DEV393_PATH(DEV393_CIRCBUF0), DEV393_PATH(DEV393_CIRCBUF1),
@@ -112,15 +91,21 @@ static const char *jhead_file_names[] = {
 		DEV393_PATH(DEV393_JPEGHEAD2), DEV393_PATH(DEV393_JPEGHEAD3)
 };
 
+/**
+ * @brief Start one instance of video interface for circbuf: open and mmap circbuf,
+ * start RTP stream in new thread.
+ * @param   port   sensor port number this instance should work with
+ * @param   pars   pointer to parameters instance for the current sensor port
+ * @return  None
+ */
 Video::Video(int port, Parameters *pars) {
 	string err_msg;
-
-	D(sensor_port, cerr << "Video::Video() on sensor port " << port << endl);
 	params = pars;
 	sensor_port = port;
 	stream_name = "video";
-//	params = Parameters::instance();
-//	waitDaemonEnabled(-1); /// <0 - use default
+	lastDaemonBit = DAEMON_BIT_STREAMER;
+
+	D(sensor_port, cerr << "Video::Video() on sensor port " << port << endl);
 	fd_circbuf = open(circbuf_file_names[sensor_port], O_RDONLY);
 	if (fd_circbuf < 0) {
 		err_msg = "can't open " + static_cast<ostringstream &>(ostringstream() << dec << sensor_port).str();
@@ -128,7 +113,9 @@ Video::Video(int port, Parameters *pars) {
 	}
 
 	buffer_length = lseek(fd_circbuf, 0, SEEK_END);
-	/// mmap for all the lifetime of the program, not per stream. AF
+	waitDaemonEnabled(-1);                                      // <0 - use default
+
+	// mmap for all the lifetime of the program, not per stream. AF
 	buffer_ptr = (unsigned long *) mmap(0, buffer_length, PROT_READ, MAP_SHARED, fd_circbuf, 0);
 	if ((int) buffer_ptr == -1) {
 		err_msg = "can't mmap " + *circbuf_file_names[sensor_port];
@@ -136,14 +123,14 @@ Video::Video(int port, Parameters *pars) {
 	}
 	buffer_ptr_end = (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length));
 
-	/// Skip several frames if it is just booted
-	/// May get stuck here if compressor is off, it should be enabled externally
+	// Skip several frames if it is just booted
+	// May get stuck here if compressor is off, it should be enabled externally
 	D(sensor_port, cerr << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length << endl);
 	while (params->getGPValue(G_THIS_FRAME) < 10) {
-		lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// get to the end of buffer
-		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END); /// wait frame got ready there
+		lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END);           // get to the end of buffer
+		lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);           // wait frame got ready there
 	}
-	/// One more wait always to make sure compressor is actually running
+	// One more wait always to make sure compressor is actually running
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 	D(sensor_port, cerr << " frame=" << params->getGPValue(G_THIS_FRAME) << " buffer_length=" << buffer_length <<endl);
@@ -167,6 +154,11 @@ Video::Video(int port, Parameters *pars) {
 	D(sensor_port, cerr << "finish constructor" << endl);
 }
 
+/**
+ * @brief Close and unmap circbuf files
+ * @param   None
+ * @return  None
+ */
 Video::~Video(void) {
 	cerr << "Video::~Video() on port " << sensor_port << endl;
 	if (buffer_ptr != NULL) {
@@ -179,68 +171,53 @@ Video::~Video(void) {
 		close(fd_jpeghead);
 }
 
-/// Compressor should be turned on outside of the streamer
-#define TURN_COMPRESSOR_ON 0
 void Video::Start(string ip, long port, int _fps_scale, int ttl) {
 	D(sensor_port, cerr << "_play=" << _play << endl);
 	if (_play) {
 		cerr << "ERROR-->> wrong usage: Video()->Start() when already play!!!" << endl;
 		return;
 	}
-//return;
 	// statistic
 	v_t_sec = 0;
 	v_t_usec = 0;
 	v_frames = 0;
-	// create udp socket
+	// create UDP socket
 	struct video_desc_t video_desc = get_current_desc(false);
 	f_width = video_desc.width;
 	f_height = video_desc.height;
 	used_width = f_width;
 	used_height = f_height;
-//	f_width = width();
-//	f_height = height();
 	fps_scale = _fps_scale;
 	if (fps_scale < 1)
 		fps_scale = 1;
 	fps_scale_c = 0;
-	/// start compressor...NOTE: Maybe it should not?
-#if TURN_COMPRESSOR_ON
-	unsigned long write_data[4];
-	write_data[0] = FRAMEPARS_SETFRAME;
-	write_data[1] = params->getGPValue(G_THIS_FRAME) + 1;
-	write_data[2] = P_COMPRESSOR_RUN;
-	write_data[3] = COMPRESSOR_RUN_CONT;
-	write(fd_fparmsall, write_data, sizeof(write_data));
-#endif
 	RTP_Stream::Start(ip, port, ttl);
 }
 
 void Video::Stop(void) {
 	if (!_play)
 		return;
-//return;
 	RTP_Stream::Stop();
 	_play = false;
-	// destroy udp socket
+	// destroy UDP socket
 	prev_jpeg_wp = 0;
 }
 
 
 /**
- * @brief check if this application is enabled (by appropriate bit in P_DAEMON_EN), if not - 
+ * @brief Check if this application is enabled (by appropriate bit in P_DAEMON_EN), if not -
  * and wait until enabled (return false when enabled)
- * @param daemonBit - bit number to accept control in P_DAEMON_EN parameter
+ * @param   daemonBit   bit number to accept control in P_DAEMON_EN parameter
  * @return (after possible waiting) true if there was no waiting, false if there was waiting
  */
-bool Video::waitDaemonEnabled(int daemonBit) { // <0 - use default
+bool Video::waitDaemonEnabled(int daemonBit) {                  // <0 - use default
 	if ((daemonBit >= 0) && (daemonBit < 32))
 		lastDaemonBit = daemonBit;
 	unsigned long this_frame = params->getGPValue(G_THIS_FRAME);
-/// No semaphors, so it is possible to miss event and wait until the streamer will be re-enabled before sending message,
-/// but it seems not so terrible
+	// No semaphores, so it is possible to miss event and wait until the streamer will be re-enabled before sending message,
+	// but it seems not so terrible
 	D(sensor_port, cerr << " lseek(fd_circbuf" << sensor_port << ", LSEEK_DAEMON_CIRCBUF+lastDaemonBit, SEEK_END)... " << endl);
-	lseek(fd_circbuf, LSEEK_DAEMON_CIRCBUF + lastDaemonBit, SEEK_END); /// 
+	lseek(fd_circbuf, LSEEK_DAEMON_CIRCBUF + lastDaemonBit, SEEK_END);
 	D(sensor_port, cerr << "...done" << endl);
 
 	if (this_frame == params->getGPValue(G_THIS_FRAME))
@@ -249,14 +226,13 @@ bool Video::waitDaemonEnabled(int daemonBit) { // <0 - use default
 }
 
 /**
- * @brief check if this application is enabled (by appropriate bit in P_DAEMON_EN)
- * @param daemonBit - bit number to accept control in P_DAEMON_EN parameter
+ * @brief Check if this application is enabled (by appropriate bit in P_DAEMON_EN)
+ * @param   daemonBit   bit number to accept control in P_DAEMON_EN parameter
  * @return (after possible waiting) true if there was no waiting, false if there was waiting
  */
 bool Video::isDaemonEnabled(int daemonBit) { // <0 - use default
 	if ((daemonBit >= 0) && (daemonBit < 32))
 		lastDaemonBit = daemonBit;
-//	return((framePars[GLOBALPARS(G_THIS_FRAME) & PARS_FRAMES_MASK].pars[P_DAEMON_EN] & (1 << lastDaemonBit)) != 0);
 	return ((params->getFrameValue(P_DAEMON_EN) & (1 << lastDaemonBit)) != 0);
 }
 
@@ -265,9 +241,9 @@ bool Video::isDaemonEnabled(int daemonBit) { // <0 - use default
  * @brief Return (byte) pointer to valid frame 'before' current(if current is invalid - use latest,
  * wait if none are ready. Restore (or modify if had to wait) file pointer.
  * fill provided frame_pars with the metadata (including the time stamp)
- * @param frame_pars - pointer to a interframe parameters structure
- * @param before - how many frames before current pointer is needed
- * @return pointer (offset in circbuf) to the frame start
+ * @param   frame_pars   pointer to a interframe parameters structure
+ * @param   before   how many frames before current pointer is needed
+ * @return  pointer (offset in circbuf) to the frame start
  */
 long Video::getFramePars(struct interframe_params_t *frame_pars, long before, long ptr_before) {
 	long cur_pointer, p;
@@ -303,7 +279,7 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 		before--;
 	}
 
-	/// copy the interframe data (time stamps are not yet there)
+	// copy the interframe data (time stamps are not yet there)
 	long metadata_start = cur_pointer - METADATA_LEN;
 	if (metadata_start >= 0) {
 		D(sensor_port, cerr << " before=" << before << " metadata_start=" << metadata_start << endl);
@@ -334,8 +310,6 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 		}
 		cerr << dec << endl;
 		return -1;
-	} else {
-//            cerr << hex << (metadata_start/4) << dec << endl; ///************* debug
 	}
 	// find location of the time stamp and copy it to the frame_pars structure
 	long timestamp_start = (cur_pointer) + ((jpeg_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32- CCAM_MMAP_META_SEC; //! magic shift - should index first byte of the time stamp
@@ -343,16 +317,19 @@ long Video::getFramePars(struct interframe_params_t *frame_pars, long before, lo
 		timestamp_start -= buffer_length;
 	memcpy(&(frame_pars->timestamp_sec), &char_buffer_ptr[timestamp_start], 8);
 	if (ptr_before == 0)
-		lseek(fd_circbuf, this_pointer, SEEK_SET); /// restore the file pointer
+		lseek(fd_circbuf, this_pointer, SEEK_SET);              // restore the file pointer
 
 	return cur_pointer;
 }
 
 
-/// In the next function I assume that the frame pointed by current file pointer in circbuf is ready. Otherwise
-/// (if it points at next frame to be acquired) we need to increase argument of getValidFrame(long before) by 1
-/// get all parameters together
-#define FRAMEPARS_BEFORE 0 /// Change to 1 if frames are not yet ready when these functions are called
+/**
+ * @brief Return description of the current video frame, i.e. current video parameters
+ * In the next function I assume that the frame pointed by current file pointer in circbuf is ready. Otherwise
+ * (if it points at next frame to be acquired) we need to increase argument of getValidFrame(long before) by 1
+ * get all parameters together
+ */
+#define FRAMEPARS_BEFORE 0                                      // Change to 1 if frames are not yet ready when these functions are called
 struct video_desc_t Video::get_current_desc(bool with_fps) {
 	struct interframe_params_t frame_pars, prev_pars;
 	struct video_desc_t video_desc;
@@ -374,8 +351,6 @@ struct video_desc_t Video::get_current_desc(bool with_fps) {
 		}
 	}
 	video_desc.valid = true;
-//	video_desc.width = (used_width = frame_pars.width);
-//	video_desc.height = (used_height = frame_pars.height);
 	video_desc.width = frame_pars.width;
 	video_desc.height = frame_pars.height;
 	video_desc.quality = frame_pars.quality2;
@@ -385,7 +360,7 @@ struct video_desc_t Video::get_current_desc(bool with_fps) {
 void Video::fps(float fps) {
 	if (fps < 0.01)
 		return;
-	/// currently limiting FPS only works with free running TODO: Add external trigger frequency support.
+	// currently limiting FPS only works with free running TODO: Add external trigger frequency support.
 	unsigned long write_data[6];
 	long target_frame = params->getGPValue(G_THIS_FRAME) + FRAMES_AHEAD_FPS;
 	write_data[0] = FRAMEPARS_SETFRAME;
@@ -394,10 +369,8 @@ void Video::fps(float fps) {
 	write_data[3] = (unsigned long) fps * 1000;
 	write_data[4] = P_FPSFLAGS;
 	write_data[5] = 3;
-//	long rslt = write(fd_fparmsall, write_data, sizeof(write_data));
 	int rslt = params->write(write_data, sizeof(write_data));
 	if (rslt == sizeof(write_data)) { /// written OK
-//		lseek(fd_fparmsall, LSEEK_FRAME_WAIT_ABS + target_frame + FRAMES_SKIP_FPS, SEEK_END); /// skip frames 
 		params->lseek(LSEEK_FRAME_WAIT_ABS + target_frame + FRAMES_SKIP_FPS, SEEK_END); /// skip frames 
 	}
 }
@@ -419,27 +392,33 @@ unsigned long Video::get_frame_len(unsigned long offset)
 	return len;
 }
 
-/** Get interframe parameters for the frame offset given and copy them to a buffer.
+/** Get interframe parameters for the frame offset given and copy them to the buffer.
  * @param   frame_pars   buffer for interframe parameters
  * @param   offset       starting offset of the frame in circbuf (in bytes)
  * @return  None
  */
 void Video::get_frame_pars(void *frame_pars, unsigned long offset)
 {
+	unsigned long *ptr;
 	unsigned long remainder;
 	unsigned long pos;
 
 	if (offset >= METADATA_LEN) {
-		memcpy(frame_pars, &buffer_ptr[BYTE2DW(offset - METADATA_LEN)], METADATA_LEN);
+		ptr = &buffer_ptr[BYTE2DW(offset - METADATA_LEN)];
+		memcpy(frame_pars, ptr, METADATA_LEN);
+		D3(sensor_port, cerr << "Read interframe params, ptr: " << (void *)ptr << endl);
 	} else {
 		// copy the chunk from the end of the buffer
 		remainder = METADATA_LEN - offset;
 		pos = buffer_length - offset;
-		memcpy(frame_pars, &buffer_ptr[BYTE2DW(pos)], remainder);
+		ptr = &buffer_ptr[BYTE2DW(pos)];
+		memcpy(frame_pars, ptr, remainder);
+		D3(sensor_port, cerr << "Read interframe params (first chunk), ptr: " << (void *)ptr << endl);
 
 		// copy the chunk from the beginning of the buffer
 		char *dest = (char *)frame_pars + remainder;
 		memcpy(dest, buffer_ptr, offset);
+		D3(sensor_port, cerr << "Read interframe params (second chunk), ptr: " << (void *)buffer_ptr << endl);
 	}
 }
 
@@ -447,24 +426,26 @@ void Video::get_frame_pars(void *frame_pars, unsigned long offset)
 long Video::capture(void) {
 	long frame_len;
 	struct interframe_params_t frame_pars;
-//	long len;
-
+	struct interframe_params_t curr_frame_params;
+	struct interframe_params_t *fp = &curr_frame_params;
 	int quality;
 	unsigned long latestAvailableFrame_ptr;
 	unsigned long frameStartByteIndex;
 	int before;
-	///Make sure the streamer is not disabled through the bit in P_DAEMON_EN
-//	if((framePars[pars->getGPValue(G_THIS_FRAME) & PARS_FRAMES_MASK].pars[P_DAEMON_EN] & (1 << lastDaemonBit)) == 0) {
+
+	// make sure the streamer is not disabled through the bit in P_DAEMON_EN
 	if ((params->getFrameValue(P_DAEMON_EN) & (1 << lastDaemonBit)) == 0) {
-		return -DAEMON_DISABLED;  /// return exception (will stop the stream)
+		return -DAEMON_DISABLED;                                // return exception (will stop the stream)
 	}
-	frameStartByteIndex = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); /// byte index in circbuf of the frame start
+	frameStartByteIndex = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); // byte index in circbuf of the frame start
 	latestAvailableFrame_ptr = frameStartByteIndex;
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 
 	frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
 	frame_len = get_frame_len(latestAvailableFrame_ptr);
-	D3(sensor_port, cerr << "Frame start byte index: " << frameStartByteIndex << ", Frame length " << frame_len);
+	D3(sensor_port, cerr << "Frame start byte index: " << frameStartByteIndex <<
+			", frame pointer: " << (void *)frame_ptr <<
+			", frame length: " << frame_len << endl);
 
 	// read time stamp
 	unsigned char *ts_ptr = (unsigned char *) ((unsigned long) frame_ptr + (long) (((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
@@ -475,26 +456,16 @@ long Video::capture(void) {
 	memcpy(&t, (void *) ts_ptr, 8);
 	f_tv.tv_sec = t[0];
 	f_tv.tv_usec = t[1];
+
 	// read Q value
-	struct interframe_params_t curr_frame_params;
-	struct interframe_params_t *fp = &curr_frame_params;
 	get_frame_pars(fp, latestAvailableFrame_ptr);
-	D_FOLLOW(cerr << ", frame_pars->signffff " << fp->signffff << endl);
+	D3(sensor_port, cerr << "fp->signffff " << fp->signffff << endl);
 
 	// See if the frame parameters are the same as were used when starting the stream,
 	// otherwise check for up to G_SKIP_DIFF_FRAME older frames and return them instead.
 	// If that number is exceeded - return exception.
 	// Each time the latest acquired frame is considered, so we do not need to save frame pointer additionally
 	if ((fp->width != used_width) || (fp->height != used_height)) {
-		D3(sensor_port, cerr << "Looks like frame size changed, new params: h = " << fp->height << ", w = " << fp->width << endl);
-		D3(sensor_port, cerr << "shoud be h = " << used_height << ", w = " << used_width << endl);
-		D3(sensor_port, cerr << "latestAvailableFrame_ptr: " << latestAvailableFrame_ptr << endl);
-		D3(sensor_port, cerr << "Interframe params:" << endl);
-		unsigned int *iframe_data = (unsigned int *)fp;
-		for (size_t j = 0; j < sizeof(struct interframe_params_t) / 4; j++)
-			cerr << setfill('0') << setw(2) << "0x" << hex << iframe_data[j] << " ";
-		cerr << dec << endl;
-
 		for (before = 1; before <= (int) params->getGPValue(G_SKIP_DIFF_FRAME); before++) {
 			if (((frameStartByteIndex = getFramePars(&frame_pars, before)))
 					&& (frame_pars.width == used_width) && (frame_pars.height == used_height)) {
@@ -512,9 +483,7 @@ long Video::capture(void) {
 				f_tv.tv_sec = t[0];
 				f_tv.tv_usec = t[1];
 #endif
-//cerr << "skip frame: before == " << before << endl;
-//cerr << "used_width == " << used_width << "; current_width == " << frame_pars.width << endl;
-				/// update interframe data pointer
+				// update interframe data pointer
 				get_frame_pars(fp, latestAvailableFrame_ptr);
 				D3(sensor_port, cerr << "frame_pars->signffff" << fp->signffff << endl);
 				break;
@@ -526,43 +495,29 @@ long Video::capture(void) {
 		}
 		D(sensor_port, cerr << " Waiting for the original frame size to be restored , using " << before << " frames ago" << endl);
 	}
-	///long Video::getFramePars(struct interframe_params_t * frame_pars, long before) {
-	///getGPValue(unsigned long GPNumber)
+
 	quality = fp->quality2;
 	if (qtables_include && quality != f_quality) {
 		D(sensor_port, cerr << " Updating quality tables, new quality is " << quality << endl);
-		lseek(fd_jpeghead, frameStartByteIndex | 2, SEEK_END); /// '||2' indicates that we need just quantization tables, not full JPEG header
+		lseek(fd_jpeghead, frameStartByteIndex | 2, SEEK_END);  // '| 2' indicates that we need just quantization tables, not full JPEG header
 		read(fd_jpeghead, (void *) &qtable[0], 128);
 	}
 	f_quality = quality;
-	/*
-	 // check statistic
-	 static bool first = true;
-	 if(first) {
-	 struct timeval tv;
-	 gettimeofday(&tv, NULL);
-	 first = false;
-	 fprintf(stderr, "VIDEO first with time: %d:%06d at: %d:%06d\n", f_tv.tv_sec, f_tv.tv_usec, tv.tv_sec, tv.tv_usec);
-	 }
-	 */
+
 	return frame_len;
 }
 
 long Video::process(void) {
-//D(cerr << "< ";)
 	int _plen = 1400;
 	int to_send = _plen;
 	int _qtables_len = 128 + 4;
 	long frame_len = capture();
 	if (frame_len == 0) {
-//D(cerr << "[";)
-//		return false;
-		return 0; /// now never here
+		return 0;                                               // now never here
 	} else {
 		if (frame_len < 0) {
 			D(sensor_port, cerr << "capture returned negative" << frame_len << endl);
-//			return false;
-			return frame_len; /// attention (restart) is needed
+			return frame_len;                                   // attention (restart) is needed
 		}
 	}
 	// check FPS decimation
@@ -572,7 +527,6 @@ long Video::process(void) {
 	fps_scale_c++;
 	if (fps_scale_c >= fps_scale)
 		fps_scale_c = 0;
-//cerr << "fps_scale == " << fps_scale << "; fps_scale_c == " << fps_scale_c << "; to_skip == " << to_skip << endl;
 	if (to_skip)
 		return 1;
 
@@ -644,7 +598,7 @@ long Video::process(void) {
 		memcpy((void *) &h[22], (void *) &l, 2);
 		// update RTCP statistic
 		rtp_packets++;
-		rtp_octets += packet_len + 8; // data + MJPEG header
+		rtp_octets += packet_len + 8;                           // data + MJPEG header
 		// send vector
 		vect_num = 0;
 		iov[vect_num].iov_base = h;
@@ -660,7 +614,6 @@ long Video::process(void) {
 		} else {
 			iov[vect_num++].iov_len = 20;
 		}
-//		if ((data + packet_len) <= (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length))) {
 		if ((data + packet_len) <= buffer_ptr_end) {
 			iov[vect_num].iov_base = data;
 			iov[vect_num++].iov_len = packet_len;
@@ -684,7 +637,5 @@ long Video::process(void) {
 		offset += packet_len;
 	}
 	D3(sensor_port, cerr << "Packets sent: " << packet_num << endl);
-//D(cerr << "]";)
-//	return true;
 	return 1;
 }

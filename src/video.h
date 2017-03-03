@@ -31,7 +31,7 @@ using namespace std;
 #define FRAMES_AHEAD_FPS 3 /// number of frames ahead of current to write FPS limit
 #define FRAMES_SKIP_FPS  3 /// number of frames to wait after target so circbuf will have at least 2 frames with new FPS for calculation
 
-/// structure to store current video description
+/** structure to store current video description */
 struct video_desc_t {
 	bool valid;
 	int width;
@@ -52,7 +52,6 @@ public:
 	Video(int port, Parameters *pars);
 
 	virtual ~Video(void);
-	/// return description of the current frame - i.e. current video parameters
 	struct video_desc_t get_current_desc(bool with_fps = true);
 	void fps(float);
 
@@ -60,9 +59,9 @@ public:
 	void Stop(void);
 	Parameters *params;
 
-/// Using Video class to interface global camera parameters 
-	bool          waitDaemonEnabled(int daemonBit); // <0 - use default
-	bool          isDaemonEnabled(int daemonBit); // <0 - use default
+	// Using Video class to interface global camera parameters
+	bool          waitDaemonEnabled(int daemonBit);             // <0 - use default
+	bool          isDaemonEnabled(int daemonBit);               // <0 - use default
 protected:
         
 	long getFramePars(struct interframe_params_t * frame_pars, long before, long ptr_before = 0); 
@@ -74,7 +73,6 @@ protected:
 	int f_quality;
 	bool qtables_include;
 	unsigned char qtable[128];
-//	struct timeval f_tv;
 	long buffer_length;
 	unsigned long *buffer_ptr;
 	unsigned char *buffer_ptr_end;                              // pointer to the end of the buffer
@@ -84,7 +82,6 @@ protected:
 	int lastDaemonBit;
 
 	long capture(void);
-//	bool process(void);
 	long  process(void);
 	unsigned long get_frame_len(unsigned long offset);
 	void get_frame_pars(void *frame_pars, unsigned long offset);
@@ -93,14 +90,12 @@ protected:
 	long v_t_sec;
 	long v_t_usec;
 	int v_frames;
-	unsigned long used_width;   ///frame width reported by Video::width(), used as the stream width
-	unsigned long used_height;  /// similar to above
-	float used_fps;   /// similar to above
+	unsigned long used_width;                                   // frame width reported by Video::width(), used as the stream width
+	unsigned long used_height;                                  // similar to above
+	float used_fps;                                             // similar to above
 
 	int fps_scale;
-	int fps_scale_c; // counter for fps_scale
+	int fps_scale_c;                                            // counter for fps_scale
 };
-
-//extern Video *video;
 
 #endif // _VIDEO__H_
