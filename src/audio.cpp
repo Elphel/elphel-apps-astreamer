@@ -27,133 +27,140 @@
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
 
-#undef AUDIO_DEBUG
-//#define AUDIO_DEBUG
-#undef AUDIO_DEBUG_2
-//#define AUDIO_DEBUG_2
+//#undef AUDIO_DEBUG
+#define AUDIO_DEBUG
+//#undef AUDIO_DEBUG_2
+#define AUDIO_DEBUG_2
 
 #ifdef AUDIO_DEBUG
-	#define D(a) a
+	#define D(s_port, a) \
+	do { \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		a; \
+	} while (0)
 #else
-	#define D(a)
+	#define D(s_port, a)
 #endif
 
 #ifdef AUDIO_DEBUG_2
-	#define D2(a) a
+	#define D2(s_port, a) \
+	do { \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		a; \
+	} while (0)
 #else
-	#define D2(a)
+	#define D2(s_port, a)
 #endif
 
-//#define SAMPLE_TIME	50	// in milliseconds
-#define SAMPLE_TIME	20	// in milliseconds
-#define BUFFER_TIME	1000 // in milliseconds
+#define SAMPLE_TIME	20	                                        // in milliseconds
+#define BUFFER_TIME	1000                                        // in milliseconds
 
 using namespace std;
 
-Audio::Audio(bool enable, Parameters *pars, int sample_rate, int channels) {
-//cerr << "Audio::Audio()" << endl;
+Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int channels) {
 	snd_pcm_hw_params_t *hw_params;
 	snd_pcm_sw_params_t *sw_params;
 	_present = false;
 	stream_name = "audio";
 	params = pars;
+	sensor_port = port;
 
 	// normalize audio settings
-	if(sample_rate == 0)	sample_rate = SAMPLE_RATE;
-	if(sample_rate > 48000)	sample_rate = 48000;
-	if(sample_rate < 11025)	sample_rate = 11025;
+	if (sample_rate == 0)
+		sample_rate = SAMPLE_RATE;
+	if (sample_rate > 48000)
+		sample_rate = 48000;
+	if (sample_rate < 11025)
+		sample_rate = 11025;
 	_sample_rate = sample_rate;
-	if(channels == 0)		channels = SAMPLE_CHANNELS;
-	if(channels < 1)		channels = 1;
-	if(channels > 2)		channels = 2;
+	if (channels == 0)
+		channels = SAMPLE_CHANNELS;
+	if (channels < 1)
+		channels = 1;
+	if (channels > 2)
+		channels = 2;
 	_channels = channels;
 	_volume = 65535;
 	_volume *= 90;
 	_volume /= 100;
-	
+
 	SSRC = 10;
 	// here sbuffer_len in samples, not bytes
 	sbuffer_len = _sample_rate * SAMPLE_TIME;
 	sbuffer_len /= 1000;
 	sbuffer_len -= sbuffer_len % 2;
-D(	cerr << "sbuffer_len == " << sbuffer_len << endl;)
+	D(sensor_port, cerr << "sbuffer_len == " << sbuffer_len << endl);
 	_ptype = 97;
 	sbuffer = NULL;
 
-	if(enable) {
-	    // open ALSA for capturing
+	if (enable) {
+		// open ALSA for capturing
 		int err;
 		sbuffer = new short[sbuffer_len * 2 * _channels];
 		bool init_ok = false;
-		while(true) {
-			if((err = snd_pcm_open(&capture_handle, "default", SND_PCM_STREAM_CAPTURE, 0)) < 0)
+		while (true) {
+			if ((err = snd_pcm_open(&capture_handle, "default", SND_PCM_STREAM_CAPTURE, 0)) < 0)
 				break;
 			snd_pcm_hw_params_alloca(&hw_params);
-		   	if((err = snd_pcm_hw_params_any(capture_handle, hw_params)) < 0)
-   				break;
-		   	if((err = snd_pcm_hw_params_set_access(capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0)
-			   	break;
-		   	if((err = snd_pcm_hw_params_set_format(capture_handle, hw_params, SND_PCM_FORMAT_S16_BE)) < 0)
-   				break;
+			if ((err = snd_pcm_hw_params_any(capture_handle, hw_params)) < 0)
+				break;
+			if ((err = snd_pcm_hw_params_set_access(capture_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0)
+				break;
+			if ((err = snd_pcm_hw_params_set_format(capture_handle, hw_params, SND_PCM_FORMAT_S16_BE)) < 0)
+				break;
 			unsigned int t = _sample_rate;
-			if((err = snd_pcm_hw_params_set_rate_near(capture_handle, hw_params, &t, 0)) < 0)
+			if ((err = snd_pcm_hw_params_set_rate_near(capture_handle, hw_params, &t, 0)) < 0)
 				break;
 			unsigned int period_time = SAMPLE_TIME * 1000;
-			if((err = snd_pcm_hw_params_set_period_time_near(capture_handle, hw_params, &period_time, 0)) < 0)
+			if ((err = snd_pcm_hw_params_set_period_time_near(capture_handle, hw_params, &period_time, 0)) < 0)
 				break;
-D(			cerr << "period_time == " << period_time << endl;)
+			D(sensor_port, cerr << "period_time == " << period_time << endl);
 			unsigned int buffer_time = BUFFER_TIME * 1000;
-			if((err = snd_pcm_hw_params_set_buffer_time_near(capture_handle, hw_params, &buffer_time, 0)) < 0)
+			if ((err = snd_pcm_hw_params_set_buffer_time_near(capture_handle, hw_params, &buffer_time, 0)) < 0)
 				break;
-D(			cerr << "buffer_time == " << buffer_time << endl;)
+			D(sensor_port, cerr << "buffer_time == " << buffer_time << endl);
 			_sample_rate = t;
-			if((err = snd_pcm_hw_params_set_channels(capture_handle, hw_params, _channels)) < 0)
+			if ((err = snd_pcm_hw_params_set_channels(capture_handle, hw_params, _channels)) < 0)
 				break;
-			if((err = snd_pcm_hw_params(capture_handle, hw_params)) < 0)
+			if ((err = snd_pcm_hw_params(capture_handle, hw_params)) < 0)
 				break;
 
 			snd_pcm_sw_params_alloca(&sw_params);
-			if((err = snd_pcm_sw_params_current(capture_handle, sw_params)) < 0)
+			if ((err = snd_pcm_sw_params_current(capture_handle, sw_params)) < 0)
 				break;
-			if((err = snd_pcm_sw_params_set_tstamp_mode(capture_handle, sw_params, SND_PCM_TSTAMP_ENABLE)) < 0)
+			if ((err = snd_pcm_sw_params_set_tstamp_mode(capture_handle, sw_params, SND_PCM_TSTAMP_ENABLE)) < 0)
 				break;
-			if((err = snd_pcm_sw_params(capture_handle, sw_params)) < 0)
+			if ((err = snd_pcm_sw_params(capture_handle, sw_params)) < 0)
 				break;
-//			if((err = snd_pcm_prepare(capture_handle)) < 0)
-//				break;
 			init_ok = true;
 			break;
 		}
-		if(init_ok) {
-D(			cerr << endl << "Audio init: ok; with sample rate: " << _sample_rate << "; and channels: " << _channels << endl;)
-//			cerr << endl << "Audio init: ok; with sample rate: " << _sample_rate << "; and channels: " << _channels << endl;
+		if (init_ok) {
+			D(sensor_port, cerr << "Audio init: ok; with sample rate: " << _sample_rate	<< "; and channels: " << _channels << endl);
 			_present = true;
 			_play = false;
 			set_volume(_volume);
 			// create thread...
-			init_pthread((void *)this);
+			init_pthread((void *) this);
 		} else {
-D(			cerr << "Audio: init FAIL!" << endl;)
-//			cerr << "Audio: init FAIL!" << endl;
+			D(sensor_port, cerr << "Audio: init FAIL!" << endl);
 			_present = false;
 		}
 	}
 }
 
 Audio::~Audio(void) {
-//cerr << "Audio::~Audio()" << endl;
-	if(_present) {
+	if (_present) {
 		snd_pcm_drop(capture_handle);
 		snd_pcm_close(capture_handle);
 		snd_config_update_free_global();
-//cerr << "--------------->> close audio" << endl;
 	}
-	if(sbuffer != NULL)
+	if (sbuffer != NULL)
 		delete[] sbuffer;
 }
 
 void Audio::set_capture_volume(int nvolume) {
-	if(_present == false)
+	if (_present == false)
 		return;
 //	int err;
 	snd_mixer_t *mixer;
@@ -166,23 +173,23 @@ void Audio::set_capture_volume(int nvolume) {
 	snd_mixer_attach(mixer, "default");
 	snd_mixer_selem_register(mixer, NULL, NULL);
 	snd_mixer_load(mixer);
-			
-	for(elem = snd_mixer_first_elem(mixer); elem; elem = snd_mixer_elem_next(elem)) {
+
+	for (elem = snd_mixer_first_elem(mixer); elem; elem = snd_mixer_elem_next(elem)) {
 		snd_mixer_selem_get_id(elem, sid);
-		if(!snd_mixer_selem_is_active(elem))
+		if (!snd_mixer_selem_is_active(elem))
 			continue;
 		// set volume at percents for capture elements
 		snd_mixer_elem_t *selem = snd_mixer_find_selem(mixer, sid);
-		if(selem == NULL) {
+		if (selem == NULL) {
 			break;
 		}
 		long volume_min = 0;
 		long volume_max = 0;
-		if(snd_mixer_selem_get_capture_volume_range(selem, &volume_min, &volume_max) == 0) {
+		if (snd_mixer_selem_get_capture_volume_range(selem, &volume_min, &volume_max) == 0) {
 			// set volume only for capture
-			if(nvolume > 65535)
+			if (nvolume > 65535)
 				nvolume = 65535;
-			if(nvolume < 0)
+			if (nvolume < 0)
 				nvolume = 0;
 			long long vol_new = volume_max;
 			vol_new *= nvolume;
@@ -190,9 +197,13 @@ void Audio::set_capture_volume(int nvolume) {
 			long vol = 0;
 			snd_mixer_selem_get_capture_volume(selem, SND_MIXER_SCHN_FRONT_LEFT, &vol);
 			snd_mixer_selem_set_capture_volume_all(selem, vol_new);
-D(			cerr << "element " << snd_mixer_selem_id_get_name(sid) << " - OLD min vol == " << volume_min << "; max vol == " << volume_max << "; volume == " << vol << endl;)
-D(			snd_mixer_selem_get_capture_volume(selem, SND_MIXER_SCHN_FRONT_LEFT, &vol);)
-D(			cerr << "element " << snd_mixer_selem_id_get_name(sid) << " - NEW min vol == " << volume_min << "; max vol == " << volume_max << "; volume == " << vol << endl;)
+			D(sensor_port, cerr << "element " << snd_mixer_selem_id_get_name(sid) << " - OLD min vol == "
+							<< volume_min << "; max vol == " << volume_max << "; volume == " << vol
+							<< endl);
+			D(sensor_port, snd_mixer_selem_get_capture_volume(selem, SND_MIXER_SCHN_FRONT_LEFT, &vol));
+			D(sensor_port, cerr << "element " << snd_mixer_selem_id_get_name(sid) << " - NEW min vol == "
+							<< volume_min << "; max vol == " << volume_max << "; volume == " << vol
+							<< endl);
 		}
 	}
 	_volume = nvolume;
@@ -200,17 +211,14 @@ D(			cerr << "element " << snd_mixer_selem_id_get_name(sid) << " - NEW min vol =
 }
 
 void Audio::Start(string ip, long port, int ttl) {
-	if(!_present)
+	if (!_present)
 		return;
-D(	cerr << "Audio ---> Start !!!" << endl;)
-//cerr << "Audio ---> Start !!!" << endl;
-//is_first = true;
+	D(sensor_port, cerr << "Audio ---> Start !!!" << endl);
 	timestamp_rtcp = 0;
 	f_tv.tv_sec = 0;
 	f_tv.tv_usec = 0;
 	snd_pcm_prepare(capture_handle);
 	snd_pcm_reset(capture_handle);
-//cerr << "Audio ---> Start !!! - done" << endl;
 
 	// get FPGA/sys time delta
 //	Parameters *params = Parameters::instance();
@@ -242,14 +250,14 @@ D(	cerr << "Audio ---> Start !!!" << endl;)
 	tv_fpga.tv_usec = tv_fpga.tv_usec % 1000000;
 
 	bool fpga_gt = false;
-	if(tv_fpga.tv_sec > tv_sys.tv_sec)
+	if (tv_fpga.tv_sec > tv_sys.tv_sec)
 		fpga_gt = true;
 	if (tv_fpga.tv_sec == tv_sys.tv_sec)
-		if(tv_fpga.tv_usec > tv_sys.tv_usec)
+		if (tv_fpga.tv_usec > tv_sys.tv_usec)
 			fpga_gt = true;
 	struct timeval *tv_b = &tv_sys;
 	struct timeval *tv_s = &tv_fpga;
-	if(fpga_gt) {
+	if (fpga_gt) {
 		tv_b = &tv_fpga;
 		tv_s = &tv_sys;
 	}
@@ -258,9 +266,14 @@ D(	cerr << "Audio ---> Start !!!" << endl;)
 	delta_fpga_sys *= 1000000;
 	delta_fpga_sys += tv_b->tv_usec;
 	delta_fpga_sys -= tv_s->tv_usec;
-	if(fpga_gt)
+	if (fpga_gt)
 		delta_fpga_sys = -delta_fpga_sys;
 
+	D2(sensor_port, cerr << "first time = " << tv_1.tv_sec << ":" << tv_1.tv_usec
+			<< ", second time = " << tv_2.tv_sec << ":" << tv_2.tv_usec << endl);
+	D2(sensor_port, cerr << "FPGA time = " << tv_fpga.tv_sec << ":" << tv_fpga.tv_usec
+			<< ", system time = " << tv_sys.tv_sec << ":" << tv_sys.tv_usec << endl);
+	D2(sensor_port, cerr << "time delta = " << delta_fpga_sys << endl << endl);
 //fprintf(stderr, "first time == %d:%06d; second time == %d:%06d\n", tv_1.tv_sec, tv_1.tv_usec, tv_2.tv_sec, tv_2.tv_usec);
 //fprintf(stderr, "FPGA time == %d:%06d; system time == %d:%06d\n", tv_fpga.tv_sec, tv_fpga.tv_usec, tv_sys.tv_sec, tv_sys.tv_usec);
 //fprintf(stderr, "times delta == %06d\n\n", delta_fpga_sys);
@@ -269,23 +282,20 @@ D(	cerr << "Audio ---> Start !!!" << endl;)
 }
 
 void Audio::Stop(void) {
-	if(!_present)
+	if (!_present)
 		return;
-//	cerr << "Audio ---> Stop !!!" << endl;
-D(	cerr << "Audio ---> Stop !!!" << endl;)
+	D(sensor_port, cerr << "Audio ---> Stop !!!" << endl);
 	RTP_Stream::Stop();
 	f_tv.tv_sec = 0;
 	f_tv.tv_usec = 0;
 }
 
 long Audio::process(void) {
-//	static timeval ts_old = {0, 0};
 	long ret = 0;
 	snd_pcm_status_t *status;
 	snd_pcm_status_alloca(&status);
 	snd_timestamp_t ts;
 	unsigned long avail;
-//bool first = true;
 
 	for(int i = 0; i < 4; i++) {
 		snd_pcm_status(capture_handle, status);
@@ -344,16 +354,13 @@ fprintf(stderr, "status timestamp == %d:%06d at %d:%06d; delta == %d:%06d, slen 
 			// --==--
 			ret += slen;
 			process_send(slen);
-			// check again what buffer is not empty
+			// check again that buffer is not empty
 			snd_pcm_status(capture_handle, status);
 			avail = (unsigned long)snd_pcm_status_get_avail(status);
-//c++;
 			if(avail >= (unsigned long)sbuffer_len) {
-//cerr << "process() again - available " << avail << " samples" << endl;
+				D2(sensor_port, cerr << "process() again - available " << avail << " samples" << endl);
 				continue;
 			}
-//if(c != 0)
-//cerr << "process " << c << " times" << endl;
 			return ret;
 		}
 		if(slen < 0) {
@@ -372,24 +379,24 @@ long Audio::process_send(long sample_len) {
 	static unsigned short packet_num = 0;
 	unsigned short pnum;
 
-	void *m = (void *)sbuffer;
+	void *m = (void *) sbuffer;
 
 	int i;
 	long offset = 0;
 #define LEN 1200
 	static unsigned char *d = NULL;
-	if(d == NULL) {
-		d = (unsigned char *)malloc(LEN + 20);
+	if (d == NULL) {
+		d = (unsigned char *) malloc(LEN + 20);
 	}
 	int to_send = sample_len * 2 * _channels;
 	int size = to_send;
 	long count = 0;
-	
+
 	uint32_t ts;
-	for(;;) {
-		if(to_send == 0)
+	for (;;) {
+		if (to_send == 0)
 			break;
-		if(to_send > LEN) {
+		if (to_send > LEN) {
 			i = LEN;
 			to_send -= i;
 		} else {
@@ -400,7 +407,7 @@ long Audio::process_send(long sample_len) {
 		uint32_t ts_delta = i / 2;
 		ts_delta /= _channels;
 		timestamp_rtcp += ts_delta;
-		if(timestamp_rtcp > 0xFFFFFFFF)
+		if (timestamp_rtcp > 0xFFFFFFFF)
 			timestamp_rtcp &= 0xFFFFFFFF;
 		//
 		packet_num++;
@@ -408,21 +415,21 @@ long Audio::process_send(long sample_len) {
 		count += i;
 		// fill RTP header
 		d[0] = 0x80;
-		if(count >= size)
+		if (count >= size)
 			d[1] = _ptype + 0x80;
 		else
 			d[1] = _ptype;
-		memcpy((void *)&d[2], (void *)&pnum, 2);
-		memcpy((void *)&d[4], (void *)&ts, 4);
-		memcpy((void *)&d[8], (void *)&SSRC, 4);
-        // fill data
-		memcpy((void *)&d[12], (void *)((char *)m + offset), i);
+		memcpy((void *) &d[2], (void *) &pnum, 2);
+		memcpy((void *) &d[4], (void *) &ts, 4);
+		memcpy((void *) &d[8], (void *) &SSRC, 4);
+		// fill data
+		memcpy((void *) &d[12], (void *) ((char *) m + offset), i);
 		offset += i;
 		// send packet
 		rtp_packets++;
 		rtp_octets += i; // data + MJPEG header
-		rtp_socket->send((void *)d, i + 12);
-    }
+		rtp_socket->send((void *) d, i + 12);
+	}
 
 	return sample_len;
 }

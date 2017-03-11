@@ -39,7 +39,7 @@ using namespace std;
 		a; \
 	} while (0)
 #else
-	#define D(a)
+	#define D(s_port, a)
 #endif
 
 RTP_Stream::RTP_Stream(void) {
@@ -200,6 +200,8 @@ void RTP_Stream::rtcp_send_sr(void) {
 	ul = htonl(rtp_octets);
 	memcpy((void *) &packet[24], (void *) &ul, 4);
 	rtcp_socket->send(packet, packet_len);
+	D(sensor_port, cerr << "stream name: " << stream_name << ", f_tv: " << f_tv.tv_sec << ":" << f_tv.tv_usec
+			<< ", timestamp: " << timestamp << endl);
 }
 
 void RTP_Stream::rtcp_send_sdes(void) {

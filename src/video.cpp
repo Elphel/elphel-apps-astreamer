@@ -40,10 +40,10 @@ using namespace std;
 
 //#undef VIDEO_DEBUG
 //#undef VIDEO_DEBUG_2	                                        // for timestamp monitoring
-//#undef VIDEO_DEBUG_3	                                        // for FPS monitoring
+#undef VIDEO_DEBUG_3	                                        // for FPS monitoring
 #define VIDEO_DEBUG
 #define VIDEO_DEBUG_2	                                        // for timestamp monitoring
-#define VIDEO_DEBUG_3	                                        // for FPS monitoring
+//#define VIDEO_DEBUG_3	                                        // for FPS monitoring
 
 #ifdef VIDEO_DEBUG
 	#define D(s_port, a) \
@@ -52,7 +52,7 @@ using namespace std;
 		a; \
 	} while (0)
 #else
-	#define D(a)
+	#define D(s_port, a)
 #endif
 
 #ifdef VIDEO_DEBUG_2
@@ -62,7 +62,7 @@ using namespace std;
 		a; \
 	} while (0)
 #else
-	#define D2(a)
+	#define D2(s_port, a)
 #endif
 
 #ifdef VIDEO_DEBUG_3
@@ -72,7 +72,7 @@ using namespace std;
 		a; \
 	} while (0)
 #else
-	#define D3(a)
+	#define D3(s_port, a)
 #endif
 
 /** The length of interframe parameters in bytes */
@@ -459,7 +459,6 @@ long Video::capture(void) {
 
 	// read Q value
 	get_frame_pars(fp, latestAvailableFrame_ptr);
-	D3(sensor_port, cerr << "fp->signffff " << fp->signffff << endl);
 
 	// See if the frame parameters are the same as were used when starting the stream,
 	// otherwise check for up to G_SKIP_DIFF_FRAME older frames and return them instead.

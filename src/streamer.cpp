@@ -65,7 +65,7 @@ Streamer::Streamer(const map<string, string> &_args, int port_num) {
 	params = new Parameters(sensor_port);
 	args = _args;
 	audio = NULL;
-	session->process_audio = false;
+	session->process_audio = true;
 	session->audio.sample_rate = 0;
 	session->audio.channels = 0;
 	session->rtp_out.ip_custom = false;
@@ -83,6 +83,13 @@ Streamer::Streamer(const map<string, string> &_args, int port_num) {
 	}
 	rtsp_server = NULL;
 	connected_count = 0;
+
+	// DEBUG FEATURE: self-enable audio processing, this should be done elsewhere, probably from camvc
+	unsigned long snd_en = 0;
+	if (session->process_audio)
+		snd_en = 1;
+	unsigned long params_array[2] = {P_STROP_AUDIO_EN, snd_en};
+	params->setPValue(params_array, 2);
 }
 
 void Streamer::audio_init(void) {
@@ -91,7 +98,7 @@ void Streamer::audio_init(void) {
 		delete audio;
 	}
 	D(sensor_port, cout << "audio_enabled == " << session->process_audio << endl);
-	audio = new Audio(session->process_audio, params, session->audio.sample_rate, session->audio.channels);
+	audio = new Audio(sensor_port, session->process_audio, params, session->audio.sample_rate, session->audio.channels);
 	if (audio->present() && session->process_audio) {
 		session->process_audio = true;
 		session->audio.type = audio->ptype();
@@ -271,6 +278,7 @@ int Streamer::update_settings(bool apply) {
 		f_audio_channels = true;
 	if ((audio_proc || session->process_audio) && (f_audio_rate || f_audio_channels))
 		audio_was_changed = true;
+	D(sensor_port, cerr << "audio_proc = " << audio_proc << ", process_audio = " << session->process_audio << ", f_audio_rate = " << f_audio_rate << "f_audio_channels = " << f_audio_channels << endl);
 	if (apply) {
 		bool audio_restarted = false;
 		if (audio_was_changed) {
