@@ -278,7 +278,8 @@ int Streamer::update_settings(bool apply) {
 		f_audio_channels = true;
 	if ((audio_proc || session->process_audio) && (f_audio_rate || f_audio_channels))
 		audio_was_changed = true;
-	D(sensor_port, cerr << "audio_proc = " << audio_proc << ", process_audio = " << session->process_audio << ", f_audio_rate = " << f_audio_rate << "f_audio_channels = " << f_audio_channels << endl);
+	D(sensor_port, cerr << "audio_proc = " << audio_proc << ", process_audio = " << session->process_audio << ", f_audio_rate = " << f_audio_rate
+			<< ", f_audio_channels = " << f_audio_channels << endl);
 	if (apply) {
 		bool audio_restarted = false;
 		if (audio_was_changed) {

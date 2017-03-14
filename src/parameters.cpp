@@ -119,3 +119,19 @@ bool Parameters::daemon_enabled(void) {
 void Parameters::setPValue(unsigned long *val_array, int count) {
 	this->write(val_array, sizeof(unsigned long) * count);
 }
+
+/**
+ * @brief Get current FPGA time
+ * @return   Time value in \e timeval structure
+ */
+struct timeval Parameters::get_fpga_time(void)
+{
+	struct timeval tv;
+	unsigned long write_data[] = {FRAMEPARS_GETFPGATIME, 0};
+
+	write(write_data, sizeof(unsigned long) * 2);
+	tv.tv_sec = getGPValue(G_SECONDS);
+	tv.tv_usec = getGPValue(G_MICROSECONDS);
+
+	return tv;
+}

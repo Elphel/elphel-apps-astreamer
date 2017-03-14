@@ -1,7 +1,7 @@
 /**
- * @file FILENAME
- * @brief BRIEF DESCRIPTION
- * @copyright Copyright (C) YEAR Elphel Inc.
+ * @file helper.h
+ * @brief Various time helper functions to work with \e timeval structures
+ * @copyright Copyright (C) 2017 Elphel Inc.
  * @author AUTHOR <EMAIL>
  *
  * @par License:
@@ -54,4 +54,19 @@ inline struct timeval time_minus(struct timeval tv_1, const struct timeval &tv_2
 	return tv_1;
 }
 
-#endif
+/**
+ * @brief Add microseconds to a value represented by \e timeval structure
+ * @param   tv   time to which microseconds should be added
+ * @param   us   the value of microseconds
+ * @return  The sum of two values
+ */
+inline struct timeval time_plus_us(struct timeval &tv, unsigned long us)
+{
+	tv.tv_usec += us;
+	tv.tv_sec += tv.tv_usec / 1000000;
+	tv.tv_usec = tv.tv_usec % 1000000;
+
+	return tv;
+}
+
+#endif /* __H_HELPER__ */

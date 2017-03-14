@@ -48,6 +48,7 @@ public:
 	bool daemon_enabled(void);
 	void setPValue(unsigned long *val_array, int count);
 	inline int get_port_num() const {return sensor_port;}
+	struct timeval get_fpga_time(void);
 protected:
 //	static Parameters *_parameters;
 

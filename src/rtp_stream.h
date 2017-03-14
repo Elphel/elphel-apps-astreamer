@@ -50,21 +50,19 @@ protected:
 	static void *pthread_f(void *_this);
 	void *thread(void);
 	pthread_mutex_t pthm_flow;
-//	virtual bool process(void) = 0;
 	virtual long process(void) = 0;
 
 	int _ptype;
 	bool _play;
-	/// semaphore to wait 'play' event
-	sem_t sem_play;
+	sem_t sem_play;                                             //< semaphore to wait 'play' event
 	Socket *rtp_socket;
 	Socket *rtcp_socket;
 
-	unsigned short packet_num;
+	unsigned short packet_num;                                  //< sequence number in RTP packet header
 	unsigned long SSRC;
 
 	struct timeval f_tv;
-	struct timeval rtcp_tv; // time of last SR
+	struct timeval rtcp_tv;                                     //< time of last SR
 	long rtcp_delay;
 	unsigned long timestamp;
 

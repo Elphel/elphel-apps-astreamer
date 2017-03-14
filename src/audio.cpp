@@ -52,8 +52,9 @@
 	#define D2(s_port, a)
 #endif
 
-#define SAMPLE_TIME	20	                                        // in milliseconds
-#define BUFFER_TIME	1000                                        // in milliseconds
+#define SAMPLE_TIME	              20	                        //< restrict ALSA to have this period, in milliseconds
+#define BUFFER_TIME	              1000                          //< approximate buffer duration for ALSA, in milliseconds
+#define LEN                       1200                          //< the size of data buffer for RTP packet, in bytes
 
 using namespace std;
 
@@ -92,11 +93,13 @@ Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int chann
 	D(sensor_port, cerr << "sbuffer_len == " << sbuffer_len << endl);
 	_ptype = 97;
 	sbuffer = NULL;
+	packet_buffer = NULL;
 
 	if (enable) {
 		// open ALSA for capturing
 		int err;
 		sbuffer = new short[sbuffer_len * 2 * _channels];
+		packet_buffer = new unsigned char[LEN + 20];
 		bool init_ok = false;
 		while (true) {
 			if ((err = snd_pcm_open(&capture_handle, "default", SND_PCM_STREAM_CAPTURE, 0)) < 0)
@@ -130,6 +133,12 @@ Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int chann
 				break;
 			if ((err = snd_pcm_sw_params_set_tstamp_mode(capture_handle, sw_params, SND_PCM_TSTAMP_ENABLE)) < 0)
 				break;
+			/* SND_PCM_TSTAMP_TYPE_GETTIMEOFDAY for some reason does not produce time stamps equal to system time,
+			 * so stick with monotonic time stamps and apply the difference between FPGA time and ALSA time stamps to
+			 * the current samples during transmission
+			 */
+			if ((err = snd_pcm_sw_params_set_tstamp_type(capture_handle, sw_params, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0)
+				break;
 			if ((err = snd_pcm_sw_params(capture_handle, sw_params)) < 0)
 				break;
 			init_ok = true;
@@ -157,12 +166,13 @@ Audio::~Audio(void) {
 	}
 	if (sbuffer != NULL)
 		delete[] sbuffer;
+	if (packet_buffer != NULL)
+		delete[] packet_buffer;
 }
 
 void Audio::set_capture_volume(int nvolume) {
 	if (_present == false)
 		return;
-//	int err;
 	snd_mixer_t *mixer;
 	snd_mixer_elem_t *elem;
 	snd_mixer_selem_id_t *sid;
@@ -210,6 +220,18 @@ void Audio::set_capture_volume(int nvolume) {
 	snd_mixer_close(mixer);
 }
 
+/**
+ * @brief Start audio stream if it was enabled
+ * The time delta between FPGA time and time stamps reported by ALSA is calculated before stream is started.
+ * This delta is applied to time stamps received from ALSA. Previously, this delta was calculated as time difference
+ * between FPGA time and system time reported by \e getsystimeofday(), but as for now ALSA reports monotonic
+ * time stamps regardless of the time stamp type set by \e snd_pcm_sw_params_set_tstamp_type(). See git commit
+ * 58b954f239b695b7deda7a33657841d2c64476ae (or earlier) for previous implementation.
+ * @param   ip   ip/port pair for socket
+ * @param   port ip/port pair for socket
+ * @param   ttl  ttl value for socket
+ * @return  None
+ */
 void Audio::Start(string ip, long port, int ttl) {
 	if (!_present)
 		return;
@@ -220,63 +242,9 @@ void Audio::Start(string ip, long port, int ttl) {
 	snd_pcm_prepare(capture_handle);
 	snd_pcm_reset(capture_handle);
 
-	// get FPGA/sys time delta
-//	Parameters *params = Parameters::instance();
-	unsigned long write_data[6];
-	write_data[0] = FRAMEPARS_GETFPGATIME;
-	write_data[1] = 0;
-	params->write(write_data, sizeof(unsigned long) * 2);
-	struct timeval tv_1;
-	tv_1.tv_sec = params->getGPValue(G_SECONDS);
-	tv_1.tv_usec = params->getGPValue(G_MICROSECONDS);
-
-	struct timeval tv_sys;
-	gettimeofday(&tv_sys, NULL);
-
-	params->write(write_data, sizeof(unsigned long) * 2);
-	struct timeval tv_2;
-	tv_2.tv_sec = params->getGPValue(G_SECONDS);
-	tv_2.tv_usec = params->getGPValue(G_MICROSECONDS);
-
-	unsigned long delta = tv_2.tv_sec - tv_1.tv_sec;
-	delta *= 1000000;
-	delta += tv_2.tv_usec;
-	delta -= tv_1.tv_usec;
-	delta /= 2;
-	struct timeval tv_fpga;
-	tv_fpga.tv_sec = tv_1.tv_sec;
-	tv_fpga.tv_usec = tv_1.tv_usec + delta;
-	tv_fpga.tv_sec += tv_fpga.tv_usec / 1000000;
-	tv_fpga.tv_usec = tv_fpga.tv_usec % 1000000;
-
-	bool fpga_gt = false;
-	if (tv_fpga.tv_sec > tv_sys.tv_sec)
-		fpga_gt = true;
-	if (tv_fpga.tv_sec == tv_sys.tv_sec)
-		if (tv_fpga.tv_usec > tv_sys.tv_usec)
-			fpga_gt = true;
-	struct timeval *tv_b = &tv_sys;
-	struct timeval *tv_s = &tv_fpga;
-	if (fpga_gt) {
-		tv_b = &tv_fpga;
-		tv_s = &tv_sys;
-	}
-	delta_fpga_sys = 0;
-	delta_fpga_sys = tv_b->tv_sec - tv_s->tv_sec;
-	delta_fpga_sys *= 1000000;
-	delta_fpga_sys += tv_b->tv_usec;
-	delta_fpga_sys -= tv_s->tv_usec;
-	if (fpga_gt)
-		delta_fpga_sys = -delta_fpga_sys;
-
-	D2(sensor_port, cerr << "first time = " << tv_1.tv_sec << ":" << tv_1.tv_usec
-			<< ", second time = " << tv_2.tv_sec << ":" << tv_2.tv_usec << endl);
-	D2(sensor_port, cerr << "FPGA time = " << tv_fpga.tv_sec << ":" << tv_fpga.tv_usec
-			<< ", system time = " << tv_sys.tv_sec << ":" << tv_sys.tv_usec << endl);
-	D2(sensor_port, cerr << "time delta = " << delta_fpga_sys << endl << endl);
-//fprintf(stderr, "first time == %d:%06d; second time == %d:%06d\n", tv_1.tv_sec, tv_1.tv_usec, tv_2.tv_sec, tv_2.tv_usec);
-//fprintf(stderr, "FPGA time == %d:%06d; system time == %d:%06d\n", tv_fpga.tv_sec, tv_fpga.tv_usec, tv_sys.tv_sec, tv_sys.tv_usec);
-//fprintf(stderr, "times delta == %06d\n\n", delta_fpga_sys);
+	// get FPGA/ALSA time delta
+	delta_fpga_alsa = get_delta_fpga_alsa();
+	D2(sensor_port, cerr << "FPGA/ALSA time delta = " << delta_fpga_alsa << " us" << endl);
 
 	RTP_Stream::Start(ip, port, ttl);
 }
@@ -314,44 +282,11 @@ long Audio::process(void) {
 				// correct A time to V time for RTCP sync packets
 				f_tv.tv_sec -= 1;
 				f_tv.tv_usec += 1000000;
-				f_tv.tv_sec -= delta_fpga_sys / 1000000;
-				f_tv.tv_usec -= delta_fpga_sys % 1000000;
+				f_tv.tv_sec -= delta_fpga_alsa / 1000000;
+				f_tv.tv_usec -= delta_fpga_alsa % 1000000;
 				f_tv.tv_sec += f_tv.tv_usec / 1000000;
 				f_tv.tv_usec = f_tv.tv_usec % 1000000;
-/*
-				if(is_first) {
-					struct timeval tv;
-					gettimeofday(&tv, NULL);
-					is_first = false;
-					fprintf(stderr, "AUDIO first with time: %d:%06d at: %d:%06d\n", f_tv.tv_sec, f_tv.tv_usec, tv.tv_sec, tv.tv_usec);
-					sec = f_tv.tv_sec;
-				} else {
-					if(sec != f_tv.tv_sec) {
-						
-						sec = f_tv.tv_sec;
-					}
-				}
-*/
 			}
-/*
-			snd_pcm_status(capture_handle, status);
-			snd_pcm_status_get_tstamp(status, &ts);
-			avail = (unsigned long)snd_pcm_status_get_avail(status);
-			struct timeval tv_real;
-			gettimeofday(&tv_real, NULL);
-			struct timeval t_delta = {0, 0};
-			if(ts_old.tv_sec != 0 && ts_old.tv_usec != 0) {
-				long td = ts.tv_sec - ts_old.tv_sec;
-				td *= 1000000;
-				td += ts.tv_usec;
-				td -= ts_old.tv_usec;
-				t_delta.tv_sec = td / 1000000;
-				t_delta.tv_usec = td % 1000000;
-			}
-fprintf(stderr, "status timestamp == %d:%06d at %d:%06d; delta == %d:%06d, slen == %d; avail == %d\n", ts.tv_sec, ts.tv_usec, tv_real.tv_sec, tv_real.tv_usec, t_delta.tv_sec, t_delta.tv_usec, slen, avail);
-			ts_old = ts;
-*/
-			// --==--
 			ret += slen;
 			process_send(slen);
 			// check again that buffer is not empty
@@ -376,18 +311,12 @@ fprintf(stderr, "status timestamp == %d:%06d at %d:%06d; delta == %d:%06d, slen 
 }
 
 long Audio::process_send(long sample_len) {
-	static unsigned short packet_num = 0;
 	unsigned short pnum;
 
 	void *m = (void *) sbuffer;
 
 	int i;
 	long offset = 0;
-#define LEN 1200
-	static unsigned char *d = NULL;
-	if (d == NULL) {
-		d = (unsigned char *) malloc(LEN + 20);
-	}
 	int to_send = sample_len * 2 * _channels;
 	int size = to_send;
 	long count = 0;
@@ -409,27 +338,78 @@ long Audio::process_send(long sample_len) {
 		timestamp_rtcp += ts_delta;
 		if (timestamp_rtcp > 0xFFFFFFFF)
 			timestamp_rtcp &= 0xFFFFFFFF;
-		//
 		packet_num++;
 		pnum = htons(packet_num);
 		count += i;
 		// fill RTP header
-		d[0] = 0x80;
+		packet_buffer[0] = 0x80;
 		if (count >= size)
-			d[1] = _ptype + 0x80;
+			packet_buffer[1] = _ptype + 0x80;
 		else
-			d[1] = _ptype;
-		memcpy((void *) &d[2], (void *) &pnum, 2);
-		memcpy((void *) &d[4], (void *) &ts, 4);
-		memcpy((void *) &d[8], (void *) &SSRC, 4);
+			packet_buffer[1] = _ptype;
+		memcpy((void *) &packet_buffer[2], (void *) &pnum, 2);
+		memcpy((void *) &packet_buffer[4], (void *) &ts, 4);
+		memcpy((void *) &packet_buffer[8], (void *) &SSRC, 4);
 		// fill data
-		memcpy((void *) &d[12], (void *) ((char *) m + offset), i);
+		memcpy((void *) &packet_buffer[12], (void *) ((char *) m + offset), i);
 		offset += i;
 		// send packet
 		rtp_packets++;
-		rtp_octets += i; // data + MJPEG header
-		rtp_socket->send((void *) d, i + 12);
+		rtp_octets += i;                                        // total amount of payload data transmitted
+		rtp_socket->send((void *)packet_buffer, i + 12);
 	}
 
 	return sample_len;
+}
+
+/**
+ * @brief Calculate the difference between FPGA time and time stamps reported by ALSA.
+ * This function gets two time stamps from FPGA and one time stamp from ALSA driver between the first two,
+ * then calculates mean value of the two FPGA samples and finds the delta between the mean value and
+ * ALSA time stamp. This value is applied to each time stamp in sound data packet to compensate the difference.
+ * @return   The time delta in microseconds
+ */
+long long Audio::get_delta_fpga_alsa(void)
+{
+	snd_pcm_status_t *pcm_status;
+	snd_timestamp_t snd_ts;
+	struct timeval snd_tv;
+	struct timeval tv_1, tv_2;
+	struct timeval delta_tv;
+	unsigned long delta_us;
+	long long ret_val;
+	bool fpga_greater = false;
+
+	snd_pcm_status_alloca(&pcm_status);
+	tv_1 = params->get_fpga_time();
+	snd_pcm_status(capture_handle, pcm_status);
+	snd_pcm_status_get_tstamp(pcm_status, &snd_ts);
+	tv_2 = params->get_fpga_time();
+	snd_tv.tv_sec = snd_ts.tv_sec;
+	snd_tv.tv_usec = snd_ts.tv_usec;
+	delta_us = time_delta_us(tv_2, tv_1);
+	delta_us /= 2;
+	tv_1 = time_plus_us(tv_1, delta_us);
+
+	if (tv_1.tv_sec > snd_tv.tv_sec)
+		fpga_greater = true;
+	else if (tv_1.tv_sec == snd_tv.tv_sec)
+		if (tv_1.tv_usec > snd_tv.tv_usec)
+			fpga_greater = true;
+	struct timeval *tv_g = &snd_tv;                             // greater time value
+	struct timeval *tv_s = &tv_1;                               // smaller time value
+	if (fpga_greater) {
+		tv_g = &tv_1;
+		tv_s = &snd_tv;
+	}
+	delta_tv = time_minus(*tv_g, *tv_s);
+	ret_val = (long long)delta_tv.tv_sec * 1000000 + (long long)delta_tv.tv_usec;
+	if (fpga_greater) {
+		ret_val = -ret_val;
+	}
+
+	D2(sensor_port, cerr << "ALSA time stamp = " << snd_ts.tv_sec << ":" << snd_ts.tv_usec << endl);
+	D2(sensor_port, cerr << "delta_tv = " << delta_tv.tv_sec << ":" << delta_tv.tv_usec << endl);
+
+	return ret_val;
 }

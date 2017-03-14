@@ -52,10 +52,10 @@ public:
 	void Stop(void);
 protected:
 //	int fd;
-	snd_pcm_t *capture_handle;                                  // PCM handle, returned from snd_pcm_open
-	short *sbuffer;
+	snd_pcm_t *capture_handle;                                  //< PCM handle, returned from snd_pcm_open
+	short *sbuffer;                                             //< buffer for sound data
 	long sbuffer_len;
-	bool _present;                                              // flag indicating that audio interface has been initialized
+	bool _present;                                              //< flag indicating that audio interface has been initialized
 	long _sample_rate;
 	long _channels;
 	long _volume;
@@ -66,9 +66,13 @@ protected:
 	void set_capture_volume(int volume);
 
 	uint64_t timestamp_rtcp;
-	long delta_fpga_sys;	                                    // A/V clocks delta for RTCP
+	long delta_fpga_sys;	                                    //< A/V clocks delta for RTCP
 //	bool is_first;
 //	bool is_first2;
+	long long delta_fpga_alsa;                                  //< time delta between FPGA time and time reported by ALSA, in microseconds
+	unsigned char *packet_buffer;                               //< buffer for RTP packet data (header plus PCM samples)
+private:
+	long long get_delta_fpga_alsa(void);                        //< return time delta between FPGA time and time stamps reported by ALSA, in microseconds
 };
 
 #endif // _AUDIO__H_
