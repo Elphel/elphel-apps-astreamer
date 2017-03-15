@@ -468,7 +468,7 @@ string RTSP_Server::make_transport(string req) {
 		string first, second;
 		String::split(client_port, '-', first, second);
 		port_req = atol(first.c_str());
-//D(cerr << "client_port == |" << client_port << "|; first == |" << first << "|; second == |" << "|" << endl;)
+		D(cerr << "client_port == |" << client_port << "|; first == |" << first << "|; second == |" << second << "|" << endl;)
 //		session->rtp_out.port = first;
 	}
 

@@ -363,10 +363,12 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 	static bool _play = false;
 	D(sensor_port, cerr << "event: running= " << running << " ");
 	switch (event) {
-	case RTSP_Server::DESCRIBE: /// Update frame size, fps before starting new stream (generating SDP file)
+	case RTSP_Server::DESCRIBE:
+		// update frame size, fps before starting new stream (generating SDP file)
 		update_settings(true);
 		break;
-	case RTSP_Server::PARAMS_WAS_CHANGED: /// Update frame size, fps before starting new stream (generating SDP file)
+	case RTSP_Server::PARAMS_WAS_CHANGED:
+		// update frame size, fps before starting new stream (generating SDP file)
 		return (update_settings(false) || !(params->daemon_enabled()));
 	case RTSP_Server::PLAY:
 		D(sensor_port, cerr << "==PLAY==");
@@ -374,8 +376,7 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 			int ttl = -1;
 			if (session->rtp_out.multicast)
 				ttl = atoi(session->rtp_out.ttl.c_str());
-			video->Start(session->rtp_out.ip, session->rtp_out.port_video, session->video.fps_scale,
-					ttl);
+			video->Start(session->rtp_out.ip, session->rtp_out.port_video, session->video.fps_scale, ttl);
 			if (audio != NULL)
 				audio->Start(session->rtp_out.ip, session->rtp_out.port_audio, ttl);
 		}
@@ -440,7 +441,7 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 
 void Streamer::Main(void) {
 	D(sensor_port, cerr << "start Main for sensor port " << sensor_port << endl);
-	int def_port = 20020;
+	int def_port = 20020 + 4 * sensor_port;                     // +4 because RTP port should be an even number and each stream can occupy 2 ports
 	string def_ttl = "2";
 
 	session->rtp_out.ip_cached = 0;
