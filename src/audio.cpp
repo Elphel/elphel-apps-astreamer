@@ -52,13 +52,14 @@
 	#define D2(s_port, a)
 #endif
 
-#define SAMPLE_TIME	              20	                        //< restrict ALSA to have this period, in milliseconds
-#define BUFFER_TIME	              1000                          //< approximate buffer duration for ALSA, in milliseconds
+#define SAMPLE_TIME               20                            //< restrict ALSA to have this period, in milliseconds
+#define BUFFER_TIME               1000                          //< approximate buffer duration for ALSA, in milliseconds
 #define LEN                       1200                          //< the size of data buffer for RTP packet, in bytes
+#define DEFAULT_SND_DEVICE        "plughw:0,0"                  //< default sound card
 
 using namespace std;
 
-Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int channels) {
+Audio::Audio(int port, bool enable, Parameters *pars, string &dev_name, int sample_rate, int channels) {
 	snd_pcm_hw_params_t *hw_params;
 	snd_pcm_sw_params_t *sw_params;
 	_present = false;
@@ -101,8 +102,17 @@ Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int chann
 		sbuffer = new short[sbuffer_len * 2 * _channels];
 		packet_buffer = new unsigned char[LEN + 20];
 		bool init_ok = false;
+
+		if (dev_name == "")
+			dev_name = DEFAULT_SND_DEVICE;
 		while (true) {
-			if ((err = snd_pcm_open(&capture_handle, "default", SND_PCM_STREAM_CAPTURE, 0)) < 0)
+			/* Previously, "default" device was used in snd_pcm_open(), but this resulted in incorrect time stamps
+			 * reported by snd_pcm_status_get_tstamp() (probably a bug in ALSA plugins). The time stamps did not correspond
+			 * to system time, but rather started from 0 after reboot and then increased. Opening "plughw:0,0" device
+			 * produces correct time stamps, thus this is the default device name now and it can be set from command line.
+			 */
+			D2(sensor_port, cerr << "Trying to open " << dev_name << endl);
+			if ((err = snd_pcm_open(&capture_handle, dev_name.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0)
 				break;
 			snd_pcm_hw_params_alloca(&hw_params);
 			if ((err = snd_pcm_hw_params_any(capture_handle, hw_params)) < 0)
@@ -133,11 +143,7 @@ Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int chann
 				break;
 			if ((err = snd_pcm_sw_params_set_tstamp_mode(capture_handle, sw_params, SND_PCM_TSTAMP_ENABLE)) < 0)
 				break;
-			/* SND_PCM_TSTAMP_TYPE_GETTIMEOFDAY for some reason does not produce time stamps equal to system time,
-			 * so stick with monotonic time stamps and apply the difference between FPGA time and ALSA time stamps to
-			 * the current samples during transmission
-			 */
-			if ((err = snd_pcm_sw_params_set_tstamp_type(capture_handle, sw_params, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0)
+			if ((err = snd_pcm_sw_params_set_tstamp_type(capture_handle, sw_params, SND_PCM_TSTAMP_TYPE_GETTIMEOFDAY)) < 0)
 				break;
 			if ((err = snd_pcm_sw_params(capture_handle, sw_params)) < 0)
 				break;
@@ -153,6 +159,7 @@ Audio::Audio(int port, bool enable, Parameters *pars, int sample_rate, int chann
 			init_pthread((void *) this);
 		} else {
 			D(sensor_port, cerr << "Audio: init FAIL!" << endl);
+			D(sensor_port, cerr << "ALSA error message: " << snd_strerror(err) << endl);
 			_present = false;
 		}
 	}
@@ -224,8 +231,8 @@ void Audio::set_capture_volume(int nvolume) {
  * @brief Start audio stream if it was enabled
  * The time delta between FPGA time and time stamps reported by ALSA is calculated before stream is started.
  * This delta is applied to time stamps received from ALSA. Previously, this delta was calculated as time difference
- * between FPGA time and system time reported by \e getsystimeofday(), but as for now ALSA reports monotonic
- * time stamps regardless of the time stamp type set by \e snd_pcm_sw_params_set_tstamp_type(). See git commit
+ * between FPGA time and system time reported by \e getsystimeofday(), but this was changed because of some problems
+ * with getting system time stamps from sound device opened as "default" ("plughw" is used now). See git commit
  * 58b954f239b695b7deda7a33657841d2c64476ae (or earlier) for previous implementation.
  * @param   ip   ip/port pair for socket
  * @param   port ip/port pair for socket

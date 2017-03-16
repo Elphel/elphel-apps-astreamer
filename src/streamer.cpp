@@ -56,16 +56,14 @@ using namespace std;
 	#define D2(s_port, a)
 #endif
 
-//Streamer *Streamer::_streamer = NULL;
-
-Streamer::Streamer(const map<string, string> &_args, int port_num) {
+Streamer::Streamer(const map<string, string> &_args, int port_num, bool audio_en) {
 	sensor_port = port_num;
 	_streamer = this;
 	session = new Session();
 	params = new Parameters(sensor_port);
 	args = _args;
 	audio = NULL;
-	session->process_audio = true;
+	session->process_audio = audio_en;
 	session->audio.sample_rate = 0;
 	session->audio.channels = 0;
 	session->rtp_out.ip_custom = false;
@@ -98,17 +96,23 @@ void Streamer::audio_init(void) {
 		delete audio;
 	}
 	D(sensor_port, cout << "audio_enabled == " << session->process_audio << endl);
-	audio = new Audio(sensor_port, session->process_audio, params, session->audio.sample_rate, session->audio.channels);
-	if (audio->present() && session->process_audio) {
-		session->process_audio = true;
-		session->audio.type = audio->ptype();
-		session->audio.sample_rate = audio->sample_rate();
-		session->audio.channels = audio->channels();
-	} else {
-		session->process_audio = false;
-		session->audio.type = -1;
-		session->audio.sample_rate = 0;
-		session->audio.channels = 0;
+	if (session->process_audio) {
+		string dev_name = "";
+		map<string, string>::iterator args_it;
+		if ((args_it = args.find("D")) != args.end())
+			dev_name = args_it->second;
+		audio = new Audio(sensor_port, session->process_audio, params, dev_name, session->audio.sample_rate, session->audio.channels);
+		if (audio->present() && session->process_audio) {
+			session->process_audio = true;
+			session->audio.type = audio->ptype();
+			session->audio.sample_rate = audio->sample_rate();
+			session->audio.channels = audio->channels();
+		} else {
+			session->process_audio = false;
+			session->audio.type = -1;
+			session->audio.sample_rate = 0;
+			session->audio.channels = 0;
+		}
 	}
 }
 
@@ -278,8 +282,6 @@ int Streamer::update_settings(bool apply) {
 		f_audio_channels = true;
 	if ((audio_proc || session->process_audio) && (f_audio_rate || f_audio_channels))
 		audio_was_changed = true;
-	D(sensor_port, cerr << "audio_proc = " << audio_proc << ", process_audio = " << session->process_audio << ", f_audio_rate = " << f_audio_rate
-			<< ", f_audio_channels = " << f_audio_channels << endl);
 	if (apply) {
 		bool audio_restarted = false;
 		if (audio_was_changed) {

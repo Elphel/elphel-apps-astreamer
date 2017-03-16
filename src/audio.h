@@ -40,7 +40,7 @@ using namespace std;
 
 class Audio : public RTP_Stream {
 public:
-	Audio(int port, bool enable, Parameters *pars, int sample_rate = SAMPLE_RATE, int channels = SAMPLE_CHANNELS);
+	Audio(int port, bool enable, Parameters *pars, string &dev_name, int sample_rate = SAMPLE_RATE, int channels = SAMPLE_CHANNELS);
 	virtual ~Audio(void);
 	long sample_rate(void) { return _sample_rate; };
 	long channels(void) { return _channels; };
@@ -51,7 +51,6 @@ public:
 	void Start(string ip, long port, int ttl = -1);
 	void Stop(void);
 protected:
-//	int fd;
 	snd_pcm_t *capture_handle;                                  //< PCM handle, returned from snd_pcm_open
 	short *sbuffer;                                             //< buffer for sound data
 	long sbuffer_len;
@@ -67,8 +66,6 @@ protected:
 
 	uint64_t timestamp_rtcp;
 	long delta_fpga_sys;	                                    //< A/V clocks delta for RTCP
-//	bool is_first;
-//	bool is_first2;
 	long long delta_fpga_alsa;                                  //< time delta between FPGA time and time reported by ALSA, in microseconds
 	unsigned char *packet_buffer;                               //< buffer for RTP packet data (header plus PCM samples)
 private:

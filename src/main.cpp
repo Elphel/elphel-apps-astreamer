@@ -47,13 +47,33 @@ void clean_up(pthread_t *threads, size_t sz) {
 	}
 }
 
+/**
+ * Print help message on stdout.
+ * @param   argv   a list of command-line arguments, used to get the name of application
+ * @return  None
+ */
+void print_help(char *argv[])
+{
+	const char *msg = "Simple RTSP streamer implementation for Elphel393 series cameras.\n"
+			"Usage: %s [-s <port>][-D <sound_card>][-f <fps>][-h], where\n\n"
+			"\t-h\t\tprint this help message;\n"
+			"\t-s <port>\tstream sound from USB microphone over sensor port <port> channel. By default, audio streaming is not\n"
+			"\t\t\tenabled if this option is not specified;\n"
+			"\t-D <sound_card>\tuse <sound_card> device for sound stream input. The default device is plughw:0,0;\n"
+			"\t-f <fps>\tlimit frames per second for video streaming, works for free running mode only.\n"; // this one is processed in streamer class
+	printf(msg, argv[0]);
+}
+
 int main(int argc, char *argv[]) {
 	int ret_val;
+	int audio_port = -1;
 	string opt;
 	map<string, string> args;
+	map<string, string>::iterator args_it;
 	pthread_t threads[SENSOR_PORTS];
 	Streamer *streamers[SENSOR_PORTS] = {NULL};
 
+	// copy command-line arguments to a map container for further processing in streamer class
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-' && argv[i][1] != '\0') {
 			if (opt != "")
@@ -72,12 +92,26 @@ int main(int argc, char *argv[]) {
 	for (map<string, string>::iterator it = args.begin(); it != args.end(); it++) {
 		cerr << "|" << (*it).first << "| == |" << (*it).second << "|" << endl;
 	}
+	if ((args_it = args.find("h")) != args.end()) {
+		print_help(argv);
+		exit(EXIT_SUCCESS);
+	} else if ((args_it = args.find("s")) != args.end()) {
+		audio_port = strtol(args_it->second.c_str(), NULL, 10);
+		// sanity check, invalid conversion produces 0 which is fine
+		if (audio_port < 0 || audio_port >= SENSOR_PORTS)
+			audio_port = -1;
+	}
 
-	for (int i = 0; i < 1; i++) {
-//	for (int i = 0; i < SENSOR_PORTS; i++) {
+	for (int i = 0; i < SENSOR_PORTS; i++) {
+		bool audio_en;
 		pthread_attr_t attr;
+
+		if (i == audio_port)
+			audio_en = true;
+		else
+			audio_en = false;
 		cout << "Start thread " << i << endl;
-		streamers[i] = new Streamer(args, i);
+		streamers[i] = new Streamer(args, i, audio_en);
 
 		pthread_attr_init(&attr);
 		ret_val = pthread_create(&threads[i], &attr, Streamer::pthread_f, (void *) streamers[i]);

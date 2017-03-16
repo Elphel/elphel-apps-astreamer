@@ -33,7 +33,7 @@ using namespace std;
 
 class Streamer {
 public:
-	Streamer(const map<string, string> &args, int port_num);
+	Streamer(const map<string, string> &args, int port_num, bool audio_en = false);
 	~Streamer();
 	void Main(void);
 	bool opt_present(string name) {
