@@ -1,6 +1,6 @@
 PROG       = str
 CXXFLAGS   += -Wall -std=c++03 -I$(STAGING_DIR_HOST)/usr/include-uapi
-LDFLAGS    += -s -pthread -lasound
+LDFLAGS    += -pthread -lasound
 
 SRCS       = main.cpp streamer.cpp audio.cpp video.cpp socket.cpp rtsp.cpp rtp_stream.cpp helpers.cpp parameters.cpp
 STREAMER_OBJS = $(SRCS:.cpp=.o)
