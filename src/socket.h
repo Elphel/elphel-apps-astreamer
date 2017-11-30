@@ -25,6 +25,8 @@
 #include <string>
 #include <list>
 #include <sys/socket.h>
+// Elphel, Rocko: socket.h does not include uio.h anymore
+#include <sys/uio.h>
 
 using namespace std;
 
