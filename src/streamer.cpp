@@ -36,6 +36,9 @@ using namespace std;
 //#undef RTSP_DEBUG_2
 #define RTSP_DEBUG_2
 
+#undef RTSP_DEBUG
+#undef RTSP_DEBUG_2
+
 #ifdef RTSP_DEBUG
 	#define D(s_port, a) \
 	do { \

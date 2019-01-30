@@ -45,6 +45,9 @@ using namespace std;
 #define VIDEO_DEBUG_2	                                        // for timestamp monitoring
 //#define VIDEO_DEBUG_3	                                        // for FPS monitoring
 
+#undef VIDEO_DEBUG	                                        // for FPS monitoring
+#undef VIDEO_DEBUG_2	                                        // for FPS monitoring
+
 #ifdef VIDEO_DEBUG
 	#define D(s_port, a) \
 	do { \
