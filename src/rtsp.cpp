@@ -181,12 +181,15 @@ void RTSP_Server::main(void) {
 
 	D(static int count = 0;)
 	bool to_poll = true;
+
 //	Parameters *params = Parameters::instance();
+
 	while (true) {
+
 		if (to_poll) {
 			int poll_rez = Socket::poll(s, 500);
 			D( {if (count < 5) {
-					cerr << "poll..." << endl;
+					cerr << "Poll..." << endl;
 					count++;
 				}
 			});
@@ -204,12 +207,23 @@ void RTSP_Server::main(void) {
 				continue;
 			}
 		}
+
 		to_poll = true;
+
 		for (list<Socket *>::iterator it = s.begin(); it != s.end(); it++) {
+
 			Socket::state state = (*it)->state_refresh();
+
 			if (state == Socket::STATE_IN || state == Socket::STATE_DISCONNECT) {
-				D2(cerr << endl << "something happen on the socket!" << endl;)
+
+				if (state == Socket::STATE_IN){
+					D2(cerr << "Socket status: STATE_IN" << endl;)
+				}else{
+					D2(cerr << "Socket status: STATE_DISCONNECT" << endl;)
+				}
+
 				if (*it == socket_main_1 || *it == socket_main_2) {	// || *it == socket_main_3) {
+					D2(cerr << "Socket type:   main" << endl;)
 //					Socket *in = socket_main->accept();
 					Socket *in = (*it)->accept();
 					if (in) {
@@ -220,7 +234,7 @@ void RTSP_Server::main(void) {
 					}
 				} else {
 					// check for remove closed socket !
-					D2(cerr << "was with non-main socket" << endl;)
+					D2(cerr << "Socket type:   not main" << endl;)
 					if (!process(*it)) {
 						D2(cerr << "process failed - remove it!" << endl;)
 						D2(fprintf(stderr, "delete: 0x%p\n", *it);)

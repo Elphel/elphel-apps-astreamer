@@ -90,6 +90,7 @@ void RTP_Stream::Start(string ip, int port, int ttl) {
 //		rtcp_delay = 2500000;	// in usec
 //		rtcp_delay = 1250000;	// in usec
 		rtcp_delay = 2000000;	// in usec
+		//rtcp_delay = 5000000;	// in usec
 		_play = true;
 		/// unlock semaphore - 'play' event
 		sem_post(&sem_play);
@@ -175,12 +176,23 @@ void RTP_Stream::rtcp_send_sr(void) {
 	uint32_t ul;
 
 	// RTCP header
-	packet[0] = 0x81;
+
+	// the lower 5 bits of packet[0] are RC
+	// Report Count - we used to send '1' but with 0 reports
+	// wireshark and vlc were whining about this.
+	//
+	// old
+	//packet[0] = 0x81;
+	// new
+	packet[0] = 0x80;
 	packet[1] = 200;	// SR
 	us = htons(((packet_len) / 4) - 1);
 	memcpy((void *) &packet[2], (void *) &us, 2);
 	memcpy((void *) &packet[4], (void *) &SSRC, 4);
+
+	// old: this is done differently in live555, see RTCP.cpp
 	// NTP timestamp is a fixed point 32.32 format time
+	/*
 	ul = htonl(f_tv.tv_sec);
 	memcpy((void *) &packet[8], (void *) &ul, 4);
 	double d = f_tv.tv_usec;
@@ -191,7 +203,17 @@ void RTP_Stream::rtcp_send_sr(void) {
 	if (f > 0x0FFFFFFF)
 		f = 0x0FFFFFFF;
 	f <<= 4;
+
 	ul = htonl(f);
+	*/
+
+	// new (as in RTCP.cpp) 2019/02/12
+	ul = htonl(f_tv.tv_sec+0x83AA7E80);
+	memcpy((void *) &packet[8], (void *) &ul, 4);
+	double d = (f_tv.tv_usec/15625.0)*0x04000000;
+	ul = htonl((unsigned)(d+0.5));
+	// end new
+
 	memcpy((void *) &packet[12], (void *) &ul, 4);
 	ul = htonl(timestamp);
 	memcpy((void *) &packet[16], (void *) &ul, 4);

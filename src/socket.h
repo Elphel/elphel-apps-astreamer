@@ -63,6 +63,7 @@ public:
 	bool send_vect(const struct iovec *iov, int num);
 
 	static int poll(list<Socket *> &s, int timeout = -1);
+	static int pollout(list<Socket *> &s, int timeout = -1);
 	void listen(int in);
 	Socket *accept(void);
 //	bool connect(void);
@@ -87,6 +88,8 @@ protected:
 	stype type;
 //	int fd;
 	state _state;
+
+	pthread_mutex_t pthm_sock;
 
 	int ttl;
 	unsigned short ip_id;

@@ -35,6 +35,9 @@
 #include <iomanip>
 
 #include "streamer.h"
+#include "socket.h"
+
+#include <stdio.h>
 
 using namespace std;
 
@@ -47,6 +50,10 @@ using namespace std;
 
 #undef VIDEO_DEBUG	                                        // for FPS monitoring
 #undef VIDEO_DEBUG_2	                                        // for FPS monitoring
+
+#define VIDEO_DEBUG
+#define VIDEO_DEBUG_2
+#define VIDEO_DEBUG_3
 
 #ifdef VIDEO_DEBUG
 	#define D(s_port, a) \
@@ -249,6 +256,7 @@ bool Video::isDaemonEnabled(int daemonBit) { // <0 - use default
  * @return  pointer (offset in circbuf) to the frame start
  */
 long Video::getFramePars(struct interframe_params_t *frame_pars, long before, long ptr_before) {
+
 	long cur_pointer, p;
 
 	long this_pointer = 0;
@@ -409,7 +417,7 @@ void Video::get_frame_pars(void *frame_pars, unsigned long offset)
 	if (offset >= METADATA_LEN) {
 		ptr = &buffer_ptr[BYTE2DW(offset - METADATA_LEN)];
 		memcpy(frame_pars, ptr, METADATA_LEN);
-		D3(sensor_port, cerr << "Read interframe params, ptr: " << (void *)ptr << endl);
+		//D3(sensor_port, cerr << "Read interframe params, ptr: " << (void *)ptr << endl);
 	} else {
 		// copy the chunk from the end of the buffer
 		remainder = METADATA_LEN - offset;
@@ -425,8 +433,34 @@ void Video::get_frame_pars(void *frame_pars, unsigned long offset)
 	}
 }
 
+timeval debug_time0;
+
+int debug_init_time(){
+	gettimeofday(&debug_time0, NULL);
+	return 0;
+}
+
+int debug_print_time(char * str){
+
+	timeval t0 = debug_time0;
+	timeval t1;
+	int d_sec, d_usec;
+
+	gettimeofday(&t1, NULL);
+	d_sec  = t1.tv_sec  - t0.tv_sec;
+	d_usec = t1.tv_usec - t0.tv_usec;
+	if (d_usec < 0) {
+		d_sec -= 1;
+		d_usec += 1000000;
+	}
+	printf("%s:  %d.%06d\n",str,d_sec,d_usec);
+
+	return 0;
+}
+
 #define USE_REAL_OLD_TIMESTAMP 0
 long Video::capture(void) {
+
 	long frame_len;
 	struct interframe_params_t frame_pars;
 	struct interframe_params_t curr_frame_params;
@@ -442,13 +476,16 @@ long Video::capture(void) {
 	}
 	frameStartByteIndex = lseek(fd_circbuf, LSEEK_CIRC_TOWP, SEEK_END); // byte index in circbuf of the frame start
 	latestAvailableFrame_ptr = frameStartByteIndex;
+
 	lseek(fd_circbuf, LSEEK_CIRC_WAIT, SEEK_END);
 
 	frame_ptr = (char *) ((unsigned long) buffer_ptr + latestAvailableFrame_ptr);
 	frame_len = get_frame_len(latestAvailableFrame_ptr);
+	/*
 	D3(sensor_port, cerr << "Frame start byte index: " << frameStartByteIndex <<
 			", frame pointer: " << (void *)frame_ptr <<
 			", frame length: " << frame_len << endl);
+	*/
 
 	// read time stamp
 	unsigned char *ts_ptr = (unsigned char *) ((unsigned long) frame_ptr + (long) (((frame_len + CCAM_MMAP_META + 3) & (~0x1f)) + 32 - CCAM_MMAP_META_SEC));
@@ -506,10 +543,16 @@ long Video::capture(void) {
 	}
 	f_quality = quality;
 
+	//debug_print_time("CAPTURE TOTAL TIME");
+
 	return frame_len;
 }
 
+timeval old_curTime;
+timeval old_f_tv;
+
 long Video::process(void) {
+
 	int _plen = 1400;
 	int to_send = _plen;
 	int _qtables_len = 128 + 4;
@@ -548,15 +591,22 @@ long Video::process(void) {
 	uint32_t ts;
 	ts = timestamp;
 	ts = htonl(ts);
-	D(sensor_port, cerr << "This frame's time stamp: " << timestamp << endl);
+	//D(sensor_port, cerr << "This frame's time stamp: " << f_tv.tv_sec << "." << f_tv.tv_usec << ", calculated rtp ts = " << timestamp << endl);
 
 	long offset = 0;
 	struct iovec iov[4];
 	int vect_num;
 	bool first = true;
+	timeval curTime;
+
+	unsigned long pnum = 0;
+
+	bool last = false;
+
 	while (to_send_len && _play) {
-		unsigned long pnum = htons(packet_num);
-		bool last = false;
+
+		pnum = htons(packet_num);
+		last = false;
 		to_send = _plen;
 		if (qtables_include && first)
 			to_send = _plen - _qtables_len;
@@ -574,6 +624,7 @@ long Video::process(void) {
 			h[1] = _ptype;
 		else
 			h[1] = 0x80 + _ptype;
+
 		memcpy((void *) &h[2], (void *) &pnum, 2);
 		memcpy((void *) &h[4], (void *) &ts, 4);
 		memcpy((void *) &h[8], (void *) &SSRC, 4);
@@ -604,6 +655,7 @@ long Video::process(void) {
 		// send vector
 		vect_num = 0;
 		iov[vect_num].iov_base = h;
+
 		if (first) {
 			if (qtables_include) {
 				iov[vect_num++].iov_len = 24;
@@ -613,13 +665,49 @@ long Video::process(void) {
 				iov[vect_num++].iov_len = 20;
 			}
 			first = false;
+			gettimeofday(&curTime, NULL);
+			//cout << "sys = [" << curTime.tv_sec << "." << curTime.tv_usec << "], img = [" << f_tv.tv_sec << "." << f_tv.tv_usec << "]"<< endl;
+
+			int dTime_sec =  curTime.tv_sec - old_curTime.tv_sec;
+			int dTime_usec = curTime.tv_usec - old_curTime.tv_usec;
+
+			if (dTime_usec < 0) {
+				dTime_usec += 1000000;
+				dTime_sec  -= 1;
+			}
+
+			int dTS_sec  = f_tv.tv_sec - old_f_tv.tv_sec;
+			int dTS_usec = f_tv.tv_usec - old_f_tv.tv_usec;
+
+			if (dTS_usec < 0) {
+				dTS_usec += 1000000;
+				dTS_sec  -= 1;
+			}
+
+			/*
+			printf("\nsys=[%u.%06d], img=[%u.%06d],  deltaSys = %d.%06d,  deltaImg = %d.%06d\n\n",
+					curTime.tv_sec, curTime.tv_usec,
+					f_tv.tv_sec, f_tv.tv_usec,
+					dTime_sec, dTime_usec,
+					dTS_sec, dTS_usec
+					);
+			*/
+
+			if (curTime.tv_usec != old_curTime.tv_usec){
+				old_curTime = curTime;
+				old_f_tv = f_tv;
+			}
+
 		} else {
 			iov[vect_num++].iov_len = 20;
 		}
+
 		if ((data + packet_len) <= buffer_ptr_end) {
+
 			iov[vect_num].iov_base = data;
 			iov[vect_num++].iov_len = packet_len;
 			data += packet_len;
+
 		} else {
 			// current packet rolls over the end of the buffer, split it and set data pointer to the buffer start
 			int overshoot = (data + packet_len) - (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length));
@@ -633,11 +721,28 @@ long Video::process(void) {
 					", packet_len_first: " << packet_len_first << endl);
 			data = (unsigned char *)buffer_ptr + overshoot;
 		}
-		rtp_socket->send_vect(iov, vect_num);
+
+		//rtp_socket->poll(&rtp_socket);
+		//cerr << "Polling out for " << rtp_socket->fd << endl;
+		//Socket::pollout(s,1000);
+
+		//debug_init_time();
+
+		if (!rtp_socket->send_vect(iov, vect_num)){
+			D3(sensor_port, cerr << "Error while sending, packets sent: " << packet_num << endl);
+		}
+
+		//usleep(1);
+		//debug_print_time("send_vect time: ");
 
 		packet_num++;
 		offset += packet_len;
+
+		//D3(sensor_port, cerr << "Packets sent so far: " << packet_num << endl);
+		//usleep(1);
+
 	}
-	D3(sensor_port, cerr << "Packets sent: " << packet_num << endl);
+
+	//D3(sensor_port, cerr << "Packets sent: " << packet_num << endl);
 	return 1;
 }

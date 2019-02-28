@@ -36,13 +36,10 @@ using namespace std;
 //#undef RTSP_DEBUG_2
 #define RTSP_DEBUG_2
 
-#undef RTSP_DEBUG
-#undef RTSP_DEBUG_2
-
 #ifdef RTSP_DEBUG
 	#define D(s_port, a) \
 	do { \
-		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " :: "; \
 		a; \
 	} while (0)
 #else
@@ -52,7 +49,7 @@ using namespace std;
 #ifdef RTSP_DEBUG_2
 	#define D2(s_port, a) \
 	do { \
-		cerr << __FILE__ << ": " << __FUNCTION__ << ": " << __LINE__ << ": sensor port: " << s_port << " "; \
+		cerr << "p" << s_port << ": "; \
 		a; \
 	} while (0)
 #else
@@ -131,11 +128,12 @@ int Streamer::f_handler(void *ptr, RTSP_Server *rtsp_server, RTSP_Server::event 
 }
 
 int Streamer::update_settings(bool apply) {
-	D(sensor_port, cerr << "update_settings" << endl);
+
+	D2(sensor_port, cerr << "update_settings" << endl);
 
 	// check settings, normalize its, return 1 if was changed
 	// update settings at application if apply = 1 and parameters change isn't on-fly safe, update parameters always
-#define _CAN_BE_CHANGED	11
+	#define _CAN_BE_CHANGED	11
 	unsigned long changes_array[2 * (_CAN_BE_CHANGED + 1)];
 	int changes_array_i = 2;
 	bool params_update = false;
@@ -366,17 +364,21 @@ int Streamer::update_settings(bool apply) {
 
 int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 	static bool _play = false;
-	D(sensor_port, cerr << "event: running= " << running << " ");
+
+	D2(sensor_port, cerr << "event: running = " << running << endl);
+
 	switch (event) {
 	case RTSP_Server::DESCRIBE:
+		D2(sensor_port, cerr << "=== RTSP_Server::DESCRIBE ===" << endl);
 		// update frame size, fps before starting new stream (generating SDP file)
 		update_settings(true);
 		break;
 	case RTSP_Server::PARAMS_WAS_CHANGED:
+		D2(sensor_port, cerr << "=== RTSP_Server::PARAMS_WAS_CHANGED ===" << endl);
 		// update frame size, fps before starting new stream (generating SDP file)
 		return (update_settings(false) || !(params->daemon_enabled()));
 	case RTSP_Server::PLAY:
-		D(sensor_port, cerr << "==PLAY==");
+		D2(sensor_port, cerr << "=== RTSP_Server::PLAY ===" << endl);
 		if (connected_count == 0) {
 			int ttl = -1;
 			if (session->rtp_out.multicast)
@@ -390,7 +392,7 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 		running = true;
 		break;
 	case RTSP_Server::PAUSE:
-		D(sensor_port, cerr << "PAUSE");
+		D2(sensor_port, cerr << "=== RTSP_Server::PAUSE ===" << endl);
 		connected_count--;
 		if (connected_count <= 0) {
 			video->Stop();
@@ -402,7 +404,7 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 		}
 		break;
 	case RTSP_Server::TEARDOWN:
-		D(sensor_port, cerr << "TEARDOWN");
+		D2(sensor_port, cerr << "=== RTSP_Server::TEARDOWN ===" << endl);
 		if (!running) {
 			D(sensor_port, cerr << " was not running");
 			break;
@@ -418,7 +420,7 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 		}
 		break;
 	case RTSP_Server::RESET:
-		D(sensor_port, cerr << "RESET");
+		D2(sensor_port, cerr << "=== RTSP_Server::RESET ===" << endl);
 		if (!running) {
 			D(sensor_port, cerr << " was not running");
 			break;
@@ -437,7 +439,7 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 		 break;
 		 */
 	default:
-		D(sensor_port, cerr << "unknown == " << event);
+		D2(sensor_port, cerr << "=== RTSP_Server::UNKNOWN ===" << endl);
 		break;
 	}
 	D(sensor_port, cerr << endl);
@@ -445,7 +447,9 @@ int Streamer::handler(RTSP_Server *rtsp_server, RTSP_Server::event event) {
 }
 
 void Streamer::Main(void) {
-	D(sensor_port, cerr << "start Main for sensor port " << sensor_port << endl);
+
+	D(sensor_port, cerr << "Main() for sensor port " << sensor_port << endl);
+
 	int def_port = 20020 + 4 * sensor_port;                     // +4 because RTP port should be an even number and each stream can occupy 2 ports
 	string def_ttl = "2";
 
@@ -456,19 +460,25 @@ void Streamer::Main(void) {
 	session->rtp_out.port_audio = def_port + 2;
 	session->rtp_out.ttl = def_ttl;
 	rtsp_server = NULL;
+
 	while (true) {
 		/// Check if the streamer is enabled, restart loop after waiting
 		if (!video->waitDaemonEnabled(-1)) {
 			sched_yield();
 			continue; /// may use particular bit instead of the "default" -1
 		}
+		// the very first settings update
 		update_settings(true);
+
 		/// Got here if is and was enabled (may use more actions instead of just "continue"
 		// start RTSP server
-		D2(sensor_port, cerr << "start server" << endl);
-		if (rtsp_server == NULL)
+		D2(sensor_port, cerr << "Starting RTSP server" << endl);
+
+		if (rtsp_server == NULL) {
 			rtsp_server = new RTSP_Server(Streamer::f_handler, (void *) this, params, session);
+		}
 		rtsp_server->main();
+
 		D2(sensor_port, cerr << "server was stopped" << endl);
 		D2(sensor_port, cerr << "stop video" << endl);
 		video->Stop();

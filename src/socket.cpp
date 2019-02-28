@@ -19,6 +19,8 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#define _XOPEN_SOURCE_EXTENDED 1
+
 #include <string>
 #include <iostream>
 #include <cstdlib>
@@ -34,6 +36,15 @@
 #include <string.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
+
+#include <sys/uio.h>
+#include <sys/epoll.h>
+
+#include <sys/ioctl.h>
+#include <linux/sockios.h>
+
+#include <stdio.h>
+#include <sys/time.h>
 
 using namespace std;
 
@@ -191,6 +202,8 @@ Socket::Socket(string _ip, int _port, stype _type, int ttl) {
 	port = _port;
 	is_multicast = false;
 
+	int fileflags;
+
 D(cerr << "new socket..." << endl;)
 	_state = STATE_EMPTY;
 
@@ -219,6 +232,7 @@ D(		cerr << "TCP ::bind() == " << t; if(t != 0) cerr << "; errno == " << strerro
 		break;
 	}
 	case TYPE_UDP: {
+		//fd = socket(PF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
 		fd = socket(PF_INET, SOCK_DGRAM, 0);
 		struct sockaddr_in saddr;
 		memset(&saddr, 0, sizeof(struct sockaddr_in));
@@ -241,6 +255,36 @@ D(		cerr << "::connect() == " << t << endl;)
 //cerr << "try to set TTL to value == " << ttl << endl;
 			setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
 		}
+
+		int fl;
+		/*
+		fl = fcntl(fd, F_GETFL);
+		//printf("Socket flags: 0x%08x\n",fl);
+		fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+		*/
+		fl = fcntl(fd, F_GETFL);
+		printf("Socket flags: 0x%08x\n",fl);
+		// set output buffer here
+		/*
+		int obuf = 163840*4;
+		int rbuf = 0;
+		socklen_t optlen = sizeof(rbuf);
+
+		setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &obuf, sizeof(obuf));
+
+		getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &rbuf, &optlen);
+		cerr << "SO_SND_BUF == " << rbuf << endl;
+		*/
+		/*
+		if (fileflags = fcntl(fd, F_GETFL, 0) == -1){
+		    cerr << "fcntl F_GETFL" << endl;
+		}
+		if (fcntl(fd, F_SETFL, fileflags | FNDELAY) == -1){
+		    cerr << "fcntl F_SETFL, FNDELAY" << endl;
+		}
+		*/
+		//setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &obuf, sizeof(obuf));
+
 		break;
 	}
 	default:
@@ -265,36 +309,76 @@ Socket::~Socket() {
 int Socket::poll(list<Socket *> &s, int timeout) {
 	struct pollfd *pfd;
 	ssize_t s_size = s.size();
-
-D2(cerr << "Socket::poll()..." << endl;)
+	//D2(cerr << "Socket::poll()..." << endl;)
 	pfd = (struct pollfd *)malloc(sizeof(struct pollfd) * s_size);
 	memset(pfd, 0, sizeof(struct pollfd) * s_size);
 	int i = 0;
-D2(cerr << "socket.fd == ";)
+	D2(cerr << "socket.fd == ";)
 	for(list<Socket *>::iterator it = s.begin(); it != s.end(); it++, i++) {
 		pfd[i].fd = (*it)->fd;
-D2(cerr << pfd[i].fd << "; ";)
-//		pfd[i].events = 0xFFFF;
+		D2(cerr << pfd[i].fd << "; ";)
+		//pfd[i].events = 0xFFFF;
 		pfd[i].events = POLLIN;
 		pfd[i].revents = 0x00;
 	}
-D2(cerr << endl;)
+	D2(cerr << endl;)
+
 	int p = ::poll(pfd, s_size, timeout);
+
 	i = 0;
 	for(list<Socket *>::iterator it = s.begin(); it != s.end(); it++, i++) {
 		(*it)->_state = STATE_EMPTY;
-D2(cerr << "revents == " << pfd[i].revents << "; POLLIN == " << POLLIN << endl;)
+		//D2(cerr << "revents == " << pfd[i].revents << "; POLLIN == " << POLLIN << endl;)
 		if(pfd[i].revents & POLLIN) {
 			(*it)->_state = STATE_IN;
-D2(cerr << "STATE_IN; fd == " << (*it)->fd << "; revents == " << pfd[i].revents << endl;)
+			D2(cerr << "setting STATE_IN; fd == " << (*it)->fd << "; revents == " << pfd[i].revents << endl;)
 		} 
 		if(pfd[i].revents & POLLHUP) {
-//		if(pfd[i].revents & POLLHUP || pfd[i].revents & POLLERR) {
+		//if(pfd[i].revents & POLLHUP || pfd[i].revents & POLLERR) {
 			(*it)->_state = STATE_DISCONNECT;
-//D2(cerr << "STATE_DISCONNECT; fd == " << (*it)->fd << "; revents == " << pfd[i].revents << endl;)
-cerr << "STATE_DISCONNECT; fd == " << (*it)->fd << "; revents == " << pfd[i].revents << endl;
+			//D2(cerr << "STATE_DISCONNECT; fd == " << (*it)->fd << "; revents == " << pfd[i].revents << endl;)
+			cerr << "STATE_DISCONNECT; fd == " << (*it)->fd << "; revents == " << pfd[i].revents << endl;
 		} 
 	}
+	free((void *)pfd);
+	return p;
+}
+
+int Socket::pollout(list<Socket *> &s, int timeout) {
+
+	struct pollfd *pfd;
+	ssize_t s_size = s.size();
+
+	D2(cerr << "Socket::pollout()..." << endl;)
+
+	pfd = (struct pollfd *)malloc(sizeof(struct pollfd) * s_size);
+	memset(pfd, 0, sizeof(struct pollfd) * s_size);
+
+	int i = 0;
+	//D2(cerr << "socket.fd == ";)
+	for(list<Socket *>::iterator it = s.begin(); it != s.end(); it++, i++) {
+		pfd[i].fd = (*it)->fd;
+		D2(cerr << "pollout socket's fd = " << pfd[i].fd << "; ";)
+		pfd[i].events = POLLOUT | POLLERR;
+		pfd[i].revents = 0x00;
+	}
+	D2(cerr << endl;)
+
+	int p = ::poll(pfd, s_size, timeout);
+
+	i = 0;
+
+	for(list<Socket *>::iterator it = s.begin(); it != s.end(); it++, i++) {
+		/*
+		if(pfd[i].revents & POLLIN) {
+			cerr << "it's POLLOUT" << endl;
+		}
+		*/
+		if(pfd[i].revents & POLLERR) {
+			cerr << "it's POLLERR" << endl;
+		}
+	}
+
 	free((void *)pfd);
 	return p;
 }
@@ -421,12 +505,104 @@ bool Socket::send3v(void **v_ptr, int *v_len) {
 	return false;
 }
 
+#define EPOLL_TIMEOUT 1000
+
+void poll_wait(int fd, int events)
+{
+    int n;
+    struct pollfd pollfds[1];
+    memset((char *) &pollfds, 0, sizeof(pollfds));
+
+    pollfds[0].fd = fd;
+    pollfds[0].events = events;
+
+    n = poll(pollfds, 1, -1);
+    if (n < 0) {
+        cerr << "POLL FAILED HARD" << endl;
+    }
+}
+
 bool Socket::send_vect(const struct iovec *iov, int num)
 {
-	bool ret_val = false;
+	/*
+	// epoll_wait begin
+	int epfd = epoll_create1(0);
+	struct epoll_event event;
+	memset(&event, 0, sizeof(event));
+	event.data.fd = fd;
+	event.events = EPOLLOUT;
+	epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+	int num_ready = epoll_wait(epfd, &event, 20, EPOLL_TIMEOUT);
+	if(num_ready<0){
+		cerr << "epoll_wait() returned " << num_ready << endl;
+	}
+	close(epfd);
+	// epoll_wait end
+	*/
 
-	if (::writev(fd, iov, num))
-		ret_val = true;
+	/*
+	int socket_fd, result;
+	fd_set writeset;
+	do {
+	   FD_ZERO(&writeset);
+	   FD_SET(fd, &writeset);
+	   result = select(fd + 1, NULL, &writeset, NULL, NULL);
+	} while (result == -1 && errno == EINTR);
 
-	return ret_val;
+	if (result<0){
+		cerr << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FAIL!!!!!!!!!!!!!!!!!!!!!!!" << endl;
+	}
+	*/
+
+	int used = 0;
+	if (ioctl(fd, SIOCOUTQ, &used)<0){
+		printf("IOCTL ERROR");
+	}
+
+	//while (pending>0) {
+	//	ioctl(fd, SIOCOUTQ, &pending);
+	//}
+
+
+	//cerr << iov[0].iov_base << "  " << iov[1].iov_base << endl;
+	//unsigned char * p = (unsigned char *) iov[0].iov_base;
+	//cerr << "writev" << endl;
+
+	// this is a sequence number
+	unsigned short * p = ((unsigned short *) iov[0].iov_base);
+
+	timeval t0;
+	gettimeofday(&t0, NULL);
+	printf("writev %06d  %lu.%06d  %d\n",ntohs(p[1]),t0.tv_sec,t0.tv_usec,used);
+
+	int res = 0;
+
+	poll_wait(fd, POLLOUT|POLLERR);
+
+	gettimeofday(&t0, NULL);
+	printf("               %lu.%06d\n",t0.tv_sec,t0.tv_usec);
+
+	res = ::writev(fd, iov, num);
+
+
+	poll_wait(fd, POLLOUT|POLLERR);
+
+	gettimeofday(&t0, NULL);
+	printf("               %lu.%06d\n",t0.tv_sec,t0.tv_usec);
+
+	if (res<0){
+		//cerr << "writev() failed" << endl;
+		printf("writev failed: %d\n",res);
+		return false;
+	}else{
+		//cerr << "wrote: " << res << endl;
+		printf("wrote: %d (errno = %d)\n",res, errno);
+		/*
+		if (ioctl(fd, SIOCOUTQ, &used)<0){
+			printf("IOCTL ERROR 2");
+		}
+		*/
+		return true;
+	}
+
 }

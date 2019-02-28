@@ -89,9 +89,12 @@ int main(int argc, char *argv[]) {
 	}
 	if (opt != "")
 		args[opt] = "";
+
+	cout << "Parsed command line arguments:" << endl;
 	for (map<string, string>::iterator it = args.begin(); it != args.end(); it++) {
 		cerr << "|" << (*it).first << "| == |" << (*it).second << "|" << endl;
 	}
+
 	if ((args_it = args.find("h")) != args.end()) {
 		print_help(argv);
 		exit(EXIT_SUCCESS);
@@ -110,9 +113,10 @@ int main(int argc, char *argv[]) {
 			audio_en = true;
 		else
 			audio_en = false;
-		cout << "Start thread " << i << endl;
-		streamers[i] = new Streamer(args, i, audio_en);
 
+		cout << "Starting a new streamer thread for sensor port " << i << endl;
+
+		streamers[i] = new Streamer(args, i, audio_en);
 		pthread_attr_init(&attr);
 		ret_val = pthread_create(&threads[i], &attr, Streamer::pthread_f, (void *) streamers[i]);
 		if (ret_val != 0) {
@@ -123,8 +127,10 @@ int main(int argc, char *argv[]) {
 		}
 		pthread_attr_destroy(&attr);
 	}
-	for (size_t i = 0; i < SENSOR_PORTS; i++)
+
+	for (size_t i = 0; i < SENSOR_PORTS; i++) {
 		pthread_join(threads[i], NULL);
+	}
 
 	return 0;
 }
