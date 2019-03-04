@@ -524,85 +524,48 @@ void poll_wait(int fd, int events)
 
 bool Socket::send_vect(const struct iovec *iov, int num)
 {
-	/*
-	// epoll_wait begin
-	int epfd = epoll_create1(0);
-	struct epoll_event event;
-	memset(&event, 0, sizeof(event));
-	event.data.fd = fd;
-	event.events = EPOLLOUT;
-	epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
-	int num_ready = epoll_wait(epfd, &event, 20, EPOLL_TIMEOUT);
-	if(num_ready<0){
-		cerr << "epoll_wait() returned " << num_ready << endl;
-	}
-	close(epfd);
-	// epoll_wait end
-	*/
+	int res;
+	struct msghdr mess;
+	memset(&mess, 0, sizeof(mess));
 
-	/*
-	int socket_fd, result;
-	fd_set writeset;
-	do {
-	   FD_ZERO(&writeset);
-	   FD_SET(fd, &writeset);
-	   result = select(fd + 1, NULL, &writeset, NULL, NULL);
-	} while (result == -1 && errno == EINTR);
+	mess.msg_iov = (struct iovec*) iov;
+	mess.msg_iovlen = num;
 
-	if (result<0){
-		cerr << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!FAIL!!!!!!!!!!!!!!!!!!!!!!!" << endl;
-	}
-	*/
-
-	int used = 0;
-	if (ioctl(fd, SIOCOUTQ, &used)<0){
-		printf("IOCTL ERROR");
-	}
-
-	//while (pending>0) {
-	//	ioctl(fd, SIOCOUTQ, &pending);
-	//}
-
-
-	//cerr << iov[0].iov_base << "  " << iov[1].iov_base << endl;
-	//unsigned char * p = (unsigned char *) iov[0].iov_base;
-	//cerr << "writev" << endl;
-
-	// this is a sequence number
-	unsigned short * p = ((unsigned short *) iov[0].iov_base);
-
-	timeval t0;
-	gettimeofday(&t0, NULL);
-	printf("writev %06d  %lu.%06d  %d\n",ntohs(p[1]),t0.tv_sec,t0.tv_usec,used);
-
-	int res = 0;
-
-	poll_wait(fd, POLLOUT|POLLERR);
-
-	gettimeofday(&t0, NULL);
-	printf("               %lu.%06d\n",t0.tv_sec,t0.tv_usec);
-
-	res = ::writev(fd, iov, num);
-
-
-	poll_wait(fd, POLLOUT|POLLERR);
-
-	gettimeofday(&t0, NULL);
-	printf("               %lu.%06d\n",t0.tv_sec,t0.tv_usec);
+	//int res = ::writev(fd, iov, num);
+	//poll_wait(fd,POLLOUT);
+	res = sendmsg(fd,&mess,0);
+	//fsync(fd);
 
 	if (res<0){
-		//cerr << "writev() failed" << endl;
-		printf("writev failed: %d\n",res);
+		printf("writev failed: %d errno=%d\n",res,errno);
 		return false;
 	}else{
-		//cerr << "wrote: " << res << endl;
-		printf("wrote: %d (errno = %d)\n",res, errno);
-		/*
-		if (ioctl(fd, SIOCOUTQ, &used)<0){
-			printf("IOCTL ERROR 2");
-		}
-		*/
+		//printf("wrote: %d (errno = %d)\n",res, errno);
 		return true;
 	}
-
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

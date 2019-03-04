@@ -548,9 +548,6 @@ long Video::capture(void) {
 	return frame_len;
 }
 
-timeval old_curTime;
-timeval old_f_tv;
-
 long Video::process(void) {
 
 	int _plen = 1400;
@@ -594,7 +591,7 @@ long Video::process(void) {
 	//D(sensor_port, cerr << "This frame's time stamp: " << f_tv.tv_sec << "." << f_tv.tv_usec << ", calculated rtp ts = " << timestamp << endl);
 
 	long offset = 0;
-	struct iovec iov[4];
+	struct iovec iov[5];
 	int vect_num;
 	bool first = true;
 	timeval curTime;
@@ -652,73 +649,58 @@ long Video::process(void) {
 		// update RTCP statistic
 		rtp_packets++;
 		rtp_octets += packet_len + 8;                           // data + MJPEG header
+
 		// send vector
 		vect_num = 0;
+
+		// 0
 		iov[vect_num].iov_base = h;
 
 		if (first) {
 			if (qtables_include) {
+				// 0
 				iov[vect_num++].iov_len = 24;
+				// 1
 				iov[vect_num].iov_base = qtable;
 				iov[vect_num++].iov_len = 128;
+				// 2
 			} else {
+				// 0
 				iov[vect_num++].iov_len = 20;
+				// 1
 			}
 			first = false;
-			gettimeofday(&curTime, NULL);
-			//cout << "sys = [" << curTime.tv_sec << "." << curTime.tv_usec << "], img = [" << f_tv.tv_sec << "." << f_tv.tv_usec << "]"<< endl;
-
-			int dTime_sec =  curTime.tv_sec - old_curTime.tv_sec;
-			int dTime_usec = curTime.tv_usec - old_curTime.tv_usec;
-
-			if (dTime_usec < 0) {
-				dTime_usec += 1000000;
-				dTime_sec  -= 1;
-			}
-
-			int dTS_sec  = f_tv.tv_sec - old_f_tv.tv_sec;
-			int dTS_usec = f_tv.tv_usec - old_f_tv.tv_usec;
-
-			if (dTS_usec < 0) {
-				dTS_usec += 1000000;
-				dTS_sec  -= 1;
-			}
-
-			/*
-			printf("\nsys=[%u.%06d], img=[%u.%06d],  deltaSys = %d.%06d,  deltaImg = %d.%06d\n\n",
-					curTime.tv_sec, curTime.tv_usec,
-					f_tv.tv_sec, f_tv.tv_usec,
-					dTime_sec, dTime_usec,
-					dTS_sec, dTS_usec
-					);
-			*/
-
-			if (curTime.tv_usec != old_curTime.tv_usec){
-				old_curTime = curTime;
-				old_f_tv = f_tv;
-			}
-
 		} else {
+			// 0
 			iov[vect_num++].iov_len = 20;
+			// 1
 		}
 
 		if ((data + packet_len) <= buffer_ptr_end) {
 
+			// 1 or 2
 			iov[vect_num].iov_base = data;
 			iov[vect_num++].iov_len = packet_len;
+			// 2 or 3
+
 			data += packet_len;
 
 		} else {
+
 			// current packet rolls over the end of the buffer, split it and set data pointer to the buffer start
 			int overshoot = (data + packet_len) - (unsigned char *)(buffer_ptr + BYTE2DW(buffer_length));
 			int packet_len_first = packet_len - overshoot;
+			// 1 or 2
 			iov[vect_num].iov_base = data;
 			iov[vect_num++].iov_len = packet_len_first;
-
+			// 2 or 3
 			iov[vect_num].iov_base = buffer_ptr;
 			iov[vect_num++].iov_len = overshoot;
+			// 3 or 4
+
 			D3(sensor_port, cerr << "Current data packet rolls over the buffer, overshoot: " << overshoot <<
 					", packet_len_first: " << packet_len_first << endl);
+
 			data = (unsigned char *)buffer_ptr + overshoot;
 		}
 
@@ -727,10 +709,15 @@ long Video::process(void) {
 		//Socket::pollout(s,1000);
 
 		//debug_init_time();
-
-		if (!rtp_socket->send_vect(iov, vect_num)){
-			D3(sensor_port, cerr << "Error while sending, packets sent: " << packet_num << endl);
+		if (vect_num==3){
+			printf("vectnum = %d\n",vect_num);
 		}
+
+		if (vect_num==4){
+			printf("RARE CASE, THE VERY FIRST PACKET OF THE FRAME ROLLED OVER BUFFER END = %d\n",vect_num);
+		}
+
+		rtp_socket->send_vect(iov, vect_num);
 
 		//usleep(1);
 		//debug_print_time("send_vect time: ");
