@@ -14,9 +14,10 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <errno.h>
+#include <sys/uio.h>
 
 #define PORT    44460
-#define MAXLINE 1420
+#define MAXLINE 1420-67
 
 #define ANSI_COLOR_RED  "\x1b[31m"
 #define ANSI_COLOR_RST  "\x1b[0m"
@@ -73,16 +74,52 @@ int main(int argc, char **argv) {
     servaddr.sin_addr.s_addr = s_addr;
     servaddr.sin_port        = htons(PORT);
 
+	struct sockaddr_in saddr;
+	memset(&saddr, 0, sizeof(struct sockaddr_in));
+	saddr.sin_family = AF_INET;
+	saddr.sin_port = htons(0);
+	saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	if (bind(fd, (struct sockaddr *)&saddr, sizeof(struct sockaddr_in))<0){
+		printf("BIND ERROR!");
+	}
+
     printf("Sending to %s:%d\n",inet_ntoa(servaddr.sin_addr),PORT);
 
     int frame_cnt = 0;
     int pnum = 0;
 
+    // connect to server?
+    if (connect(fd,(const struct sockaddr *) &servaddr, sizeof(servaddr))<0){
+    	printf("connect() error: %d",errno);
+    	return -2;
+    }
+
     // Send
-    for(;;){
-      for(int i=0;i<200;i++){
+    while(true){
+      for(int i=0;i<400;i++){
         generate_packet(buffer,pnum);
-        res = sendto(fd, (const char *)buffer, strlen(buffer), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        // tested
+        //res = sendto(fd, (const char *)buffer, strlen(buffer), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        // tested
+        //res = write(fd,(const char *)buffer,strlen(buffer));
+
+        int iovcnt;
+        struct iovec iov[3];
+
+        char *buf1 = "This is a longer string\n";
+        char *buf2 = "This is the longest string in this example\n";
+        iov[0].iov_base = buffer;
+        iov[0].iov_len = strlen(buffer);
+        iov[1].iov_base = buf1;
+        iov[1].iov_len = strlen(buf1);
+        iov[2].iov_base = buf2;
+        iov[2].iov_len = strlen(buf2);
+
+        iovcnt = 3;
+
+        res = writev(fd,iov,iovcnt);
+
         if (res<0){
           printf("    send result= %d,  errno= %d\n",res,errno);
         }else{
@@ -91,8 +128,8 @@ int main(int argc, char **argv) {
         pnum++;
       }
       //printf("%s\n",buffer);
-      printf("Sent frame %d\n",frame_cnt);
-      sleep(1);
+      printf("Sent frame %d, total packets %d\n",frame_cnt, pnum);
+      usleep(100000);
       frame_cnt++;
     }
 
